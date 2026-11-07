@@ -6,11 +6,13 @@ import { adapterSource, supportedAdapters, listAdapters, runAdapter } from './ad
 import { traceability, updateRequirement, updateGraph, sourceAt, isLocalRequest, isLocalWrite, TraceError } from './traceability.mjs';
 import { runCalculation, testCalculatorNode } from './calculator.mjs';
 import { runSum, testSumNode } from './sum.mjs';
+import { runExpression, testExpressionNode } from './expression.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const permitted = { submit: 'runSubmission', form: null, validate: 'validateFeedback', lookup: 'findDuplicate', save: 'saveFeedback', view: 'toUiState' };
 const calculatorSymbols = { calculator: 'runCalculation', 'calc-input': 'captureCalculatorInput', 'calc-validate': 'validateCalculatorInput', 'calc-compute': 'computeCalculator', 'calc-result': 'calculatorUi' };
 const sumSymbols = { sum: 'runSum', 'sum-input': 'captureSumInput', 'sum-validate': 'validateSumInput', 'sum-accumulate': 'accumulateSum', 'sum-result': 'sumUi' };
+const expressionSymbols = { expression:'runExpression', 'expr-input':'captureExpressionInput', 'expr-compute':'runExpressionCompute', 'expr-tokenize':'tokenizeExpression', 'expr-parse':'parseExpression', 'expr-evaluate':'evaluateExpression', 'expr-result':'expressionUi' };
 let store = createStore();
 
 async function jsonBody(req, limit = 40_000) {
@@ -36,8 +38,8 @@ export async function api(req, res, next) {
       if (!isLocalRequest(req)) return reply(res, 403, {error: 'Only same-origin local requests are allowed'});
       if (url.pathname === '/api/traceability') {
         const feature = url.searchParams.get('feature');
-        if (feature && !['feedback', 'calculator', 'sum'].includes(feature)) return reply(res, 404, {error: 'Unknown feature'});
-        const featureId = feature === 'calculator' ? 'calculator.calculate' : feature === 'sum' ? 'sum.calculate' : undefined;
+        if (feature && !['feedback', 'calculator', 'sum', 'expression'].includes(feature)) return reply(res, 404, {error: 'Unknown feature'});
+        const featureId = feature === 'calculator' ? 'calculator.calculate' : feature === 'sum' ? 'sum.calculate' : feature === 'expression' ? 'expression.calculate' : undefined;
         return reply(res, 200, await traceability(undefined, featureId));
       }
       return reply(res, 200, await sourceAt(url.searchParams.get('path'), Number(url.searchParams.get('line'))));
@@ -52,6 +54,13 @@ export async function api(req, res, next) {
     }
     if (req.method === 'GET' && url.pathname === '/api/adapters') return reply(res, 200, { adapters: await listAdapters() });
     if (req.method === 'GET' && url.pathname === '/api/items') return reply(res, 200, { items: store.items });
+    if (req.method === 'POST' && url.pathname === '/api/expression') {
+      return reply(res, 200, await runExpression(await jsonBody(req)));
+    }
+    if (req.method === 'POST' && url.pathname === '/api/expression/test') {
+      const body = await jsonBody(req);
+      return reply(res, 200, await testExpressionNode(body.nodeId, body.input, body.mode));
+    }
     if (req.method === 'POST' && url.pathname === '/api/sum') {
       return reply(res, 200, await runSum(await jsonBody(req)));
     }
@@ -87,6 +96,14 @@ export async function api(req, res, next) {
     }
     if (req.method === 'GET' && url.pathname === '/api/code') {
       const id = url.searchParams.get('nodeId');
+      if (id && Object.hasOwn(expressionSymbols, id)) {
+        const symbol = expressionSymbols[id];
+        const source = await fs.readFile(path.join(here, 'expression.mjs'), 'utf8');
+        const start = source.indexOf(`export ${['runExpression', 'runExpressionCompute'].includes(symbol) ? 'async ' : ''}function ${symbol}(`);
+        const nextExport = source.indexOf('\nexport ', start + 10);
+        return reply(res, 200, { symbol, file:'server/expression.mjs',
+          excerpt: start < 0 ? 'Not found' : source.slice(start, nextExport < 0 ? undefined : nextExport).trim().slice(0, 4600) });
+      }
       if (id && Object.hasOwn(sumSymbols, id)) {
         const symbol = sumSymbols[id];
         const source = await fs.readFile(path.join(here, 'sum.mjs'), 'utf8');

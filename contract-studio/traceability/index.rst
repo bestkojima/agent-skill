@@ -9,6 +9,7 @@ Contract Studio 需求追踪
    requirements
    calculator
    sum
+   expression
 
 .. src-trace::
    :project: frontend

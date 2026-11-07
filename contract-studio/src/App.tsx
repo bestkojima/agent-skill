@@ -8,6 +8,7 @@ import '@xyflow/react/dist/style.css';
 import feedbackSeed from '../contracts/feedback.json';
 import calculatorSeed from '../contracts/calculator.json';
 import sumSeed from '../contracts/sum.json';
+import expressionSeed from '../contracts/expression.json';
 
 type Kind = 'group' | 'ui' | 'logic' | 'async' | 'action';
 type Spec = {
@@ -26,7 +27,7 @@ type Requirement={id:string;nodeId:string;title:string;description:string;status
 type RequirementDraft={title:string;description:string};
 type Traceability={featureId:string;source:string;projectGraph:Graph;requirements:Requirement[];sphinx:{path:string;state:'current'|'outdated'|'missing'}};
 type DisplayNode=FlowNode<{spec:Spec;collapsed:boolean;hasChildren:boolean;run?:Step['status'];requirement?:Requirement;hasUnsavedRequirement:boolean;traceAvailable:boolean;toggle:(id:string)=>void;language:string},'contract'>;
-type Example='sum'|'calculator'|'feedback';
+type Example='expression'|'sum'|'calculator'|'feedback';
 const exampleKey='contract-studio-active-example-v1';
 const clone=<T,>(v:T):T=>JSON.parse(JSON.stringify(v)) as T;
 const toGraph=(text:string):Graph=>{
@@ -57,17 +58,20 @@ async function api<T>(path:string,body?:unknown):Promise<T>{
 function NodeCard({data}:NodeProps<DisplayNode>){
   const {spec,hasChildren,collapsed,run,requirement,hasUnsavedRequirement,traceAvailable,toggle,language}=data;
   const requirementLabel=requirement?(hasUnsavedRequirement?'需求未保存':requirement.status==='confirmed'?'需求已确认':'需求待确认'):(traceAvailable?'需求未关联':'');
+  const isComputationGroup=spec.id==='expr-compute';
   if(spec.kind==='group' && hasChildren && !collapsed){
-    return <div className="group-heading">
-      <span><span className="group-name">{spec.title}</span>{requirementLabel&&<span className={`group-requirement ${!hasUnsavedRequirement&&requirement?.status==='confirmed'?'confirmed':''}`}>{requirementLabel}</span>}</span>
-      <button className="node-toggle nodrag" onClick={(e)=>{e.stopPropagation();toggle(spec.id)}}>折叠 −</button>
+    return <div className={`group-heading ${isComputationGroup?'nested-compute-heading':''}`}>
+      {isComputationGroup&&<Handle id="in" type="target" position={Position.Left} className="flow-handle"/>}
+      <span><span className="group-name">{spec.title}</span>{requirementLabel&&<span className={`group-requirement ${!hasUnsavedRequirement&&requirement?.status==='confirmed'?'confirmed':''}`}>{requirementLabel}</span>}{isComputationGroup&&run&&<span className={`group-run ${run}`}>{run==='ok'?'✓ 已执行':run==='rejected'?'! 已拒绝':'○ Mock'}</span>}</span>
+      <button className="node-toggle nodrag" aria-expanded="true" onClick={(e)=>{e.stopPropagation();toggle(spec.id)}}>{isComputationGroup?'折叠计算步骤 −':'折叠 −'}</button>
+      {isComputationGroup&&<><Handle id="ok" type="source" position={Position.Right} style={{top:'36%'}} className="flow-handle"/><Handle id="fail" type="source" position={Position.Right} style={{top:'76%',background:'#c27d56'}} className="flow-handle"/></>}
     </div>;
   }
   return <div className={`node-card node-${spec.kind} ${run==='rejected'?'node-failed':''} ${run==='ok'?'node-passed':''}`}>
     <Handle id="in" type="target" position={Position.Left} className="flow-handle"/>
     <div className="node-kicker"><span>{labelFor(spec.kind)}</span><span>{run==='ok'?'✓ 通过':run==='rejected'?'! 拒绝':run==='mock'?'○ Mock':''}</span></div>
     <div className="node-name">{spec.title}</div>{requirementLabel&&<div className={`node-requirement ${!hasUnsavedRequirement&&requirement?.status==='confirmed'?'confirmed':''}`}>{requirementLabel}</div>}{spec.id==='validate'&&<div className="node-runtime">Adapter: {language}</div>}
-    {hasChildren&&<button className="node-toggle nodrag" onClick={(e)=>{e.stopPropagation();toggle(spec.id)}}>展开子节点 +</button>}
+    {hasChildren&&<button className="node-toggle nodrag" aria-expanded="false" onClick={(e)=>{e.stopPropagation();toggle(spec.id)}}>{isComputationGroup?'展开计算步骤 +':'展开子节点 +'}</button>}
     <Handle id="ok" type="source" position={Position.Right} style={{top:'36%'}} className="flow-handle"/>
     <Handle id="fail" type="source" position={Position.Right} style={{top:'76%',background:'#c27d56'}} className="flow-handle"/>
   </div>;
@@ -265,18 +269,72 @@ function SumPreview({onRun}:{onRun:(run:Run)=>void}){
   </section>;
 }
 
+type ExpressionStep={index:number;operator:string;operands:number[];result:number};
+type ExpressionRun=Run&{result:{status:'success'|'invalid';value?:number;message:string;steps?:ExpressionStep[]}};
+const initialExpression='12 + 3 × (8 - 4) ÷ 2';
+function describeExpressionStep(step:ExpressionStep){
+  const symbols:Record<string,string>={'+':'+','-':'−','*':'×','/':'÷','u+':'+','u-':'−'};
+  const symbol=symbols[step.operator]??step.operator;
+  return step.operands.length===1?`${symbol}${step.operands[0]}`:step.operands.join(` ${symbol} `);
+}
+
+// @need-ids: REQ_EXPR_INPUT, REQ_EXPR_RESULT
+function ExpressionPreview({onRun}:{onRun:(run:Run)=>void}){
+  const [expression,setExpression]=useState(initialExpression);
+  const [busy,setBusy]=useState(true);
+  const [result,setResult]=useState<ExpressionRun|null>(null);
+  const [error,setError]=useState('');
+  const requestId=useRef(0);
+  const onRunRef=useRef(onRun);onRunRef.current=onRun;
+  const calculate=async(value:string)=>{
+    const current=++requestId.current;
+    setBusy(true);setError('');setResult(null);
+    try{
+      const run=await api<ExpressionRun>('/api/expression',{expression:value});
+      if(current!==requestId.current)return;
+      setResult(run);onRunRef.current(run);
+    }catch(e){
+      if(current!==requestId.current)return;
+      setError(String(e));onRunRef.current({trace:[]});
+    }finally{if(current===requestId.current)setBusy(false)}
+  };
+  useEffect(()=>{void calculate(initialExpression);return()=>{requestId.current++}},[]);
+  const changeExpression=(value:string)=>{
+    requestId.current++;setExpression(value);setBusy(false);setResult(null);setError('');onRunRef.current({trace:[]});
+  };
+  const steps=result?.result.steps??[];
+  return <section className="preview-panel expression-panel">
+    <div className="panel-heading"><div><div className="eyebrow">可操作的真实功能</div><h2>混合四则运算</h2></div><span className="calculator-badge">互动演示</span></div>
+    <p className="expression-intro">输入算式，观察括号和运算优先级如何影响计算顺序。</p>
+    <form onSubmit={event=>{event.preventDefault();void calculate(expression)}}>
+      <div className="field expression-input"><label htmlFor="expression-value">算式 <span>支持括号、+、-、×、÷</span></label><input id="expression-value" value={expression} onChange={event=>changeExpression(event.target.value)} placeholder="例如 12 + 3 × (8 - 4) ÷ 2" spellCheck={false}/><span className="expression-precision">使用 JavaScript 浮点运算，部分小数可能有舍入误差。</span></div>
+      <button type="submit" className="primary-button full" disabled={busy}>{busy?'正在计算…':'计算并观察节点'}</button>
+    </form>
+    <div className={`expression-result ${error||result?.ui?.tone==='error'?'is-error':''}`} role="status">
+      <span>计算结果</span>
+      {error?<strong>{error}</strong>:result?.ui?.tone==='error'?<strong>{result.ui.message}</strong>:typeof result?.result.value==='number'?<strong>{result.result.value}</strong>:<strong className="expression-placeholder">输入算式后计算</strong>}
+    </div>
+    {steps.length>0&&<div className="expression-process">
+      <div className="expression-process-heading"><strong>逐步计算</strong><span>共 {steps.length} 步 · 实际执行顺序</span></div>
+      <ol className="expression-steps">{steps.map(step=><li key={step.index}><span className="expression-step-index">{String(step.index).padStart(2,'0')}</span><span className="expression-step-equation">{describeExpressionStep(step)}</span><strong>= {step.result}</strong></li>)}</ol>
+    </div>}
+    {result?.result.status==='success'&&steps.length===0&&<p className="micro">算式直接给出一个数字，无需进行运算。</p>}
+  </section>;
+}
+
 function Studio({example,onExampleChange}:{example:Example;onExampleChange:(example:Example)=>void}){
+  const isExpression=example==='expression';
   const isCalculator=example==='calculator';
   const isSum=example==='sum';
   const isFeedback=example==='feedback';
-  const original=(isSum?sumSeed:isCalculator?calculatorSeed:feedbackSeed) as Graph;
-  const rootId=isSum?'sum':isCalculator?'calculator':'submit';
-  const defaultSelected=isSum?'sum-accumulate':isCalculator?'calc-compute':'lookup';
-  const JSON_KEY=isSum?'contract-studio-sum-graph-v1':isCalculator?'contract-studio-calculator-graph-v1':'contract-studio-adapters-v03';
-  const GRAPH_BASE_KEY=isSum?'contract-studio-sum-graph-base-v1':isCalculator?'contract-studio-calculator-graph-base-v1':'contract-studio-project-graph-base-v1';
-  const GRAPH_PENDING_KEY=isSum?'contract-studio-sum-graph-pending-v1':isCalculator?'contract-studio-calculator-graph-pending-v1':'contract-studio-project-graph-pending-v1';
-  const REQUIREMENT_DRAFT_KEY=isSum?'contract-studio-sum-requirement-drafts-v1':isCalculator?'contract-studio-calculator-requirement-drafts-v1':'contract-studio-requirement-drafts-v1';
-  const traceUrl=isSum?'/api/traceability?feature=sum':isCalculator?'/api/traceability?feature=calculator':'/api/traceability';
+  const original=(isExpression?expressionSeed:isSum?sumSeed:isCalculator?calculatorSeed:feedbackSeed) as Graph;
+  const rootId=isExpression?'expression':isSum?'sum':isCalculator?'calculator':'submit';
+  const defaultSelected=isExpression?'expr-compute':isSum?'sum-accumulate':isCalculator?'calc-compute':'lookup';
+  const JSON_KEY=isExpression?'contract-studio-expression-graph-v1':isSum?'contract-studio-sum-graph-v1':isCalculator?'contract-studio-calculator-graph-v1':'contract-studio-adapters-v03';
+  const GRAPH_BASE_KEY=isExpression?'contract-studio-expression-graph-base-v1':isSum?'contract-studio-sum-graph-base-v1':isCalculator?'contract-studio-calculator-graph-base-v1':'contract-studio-project-graph-base-v1';
+  const GRAPH_PENDING_KEY=isExpression?'contract-studio-expression-graph-pending-v1':isSum?'contract-studio-sum-graph-pending-v1':isCalculator?'contract-studio-calculator-graph-pending-v1':'contract-studio-project-graph-pending-v1';
+  const REQUIREMENT_DRAFT_KEY=isExpression?'contract-studio-expression-requirement-drafts-v1':isSum?'contract-studio-sum-requirement-drafts-v1':isCalculator?'contract-studio-calculator-requirement-drafts-v1':'contract-studio-requirement-drafts-v1';
+  const traceUrl=isExpression?'/api/traceability?feature=expression':isSum?'/api/traceability?feature=sum':isCalculator?'/api/traceability?feature=calculator':'/api/traceability';
   const [initial]=useState(()=>{
     let graph=clone(original),hasDraft=false,base:Graph|null=null;
     try{const text=localStorage.getItem(JSON_KEY);if(text){graph=toGraph(text);hasDraft=true}}catch{/* Keep the usable bundled example. */}
@@ -330,7 +388,8 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
     const updated=await api<Traceability>('/api/traceability/requirement',{featureId:traceability?.featureId,id,nodeId,title,description,action:'create'});
     setTraceability(updated);
   };
-  const [collapsed,setCollapsed]=useState<Set<string>>(new Set());
+  const initialCollapsed=()=>new Set<string>(isExpression?['expr-compute']:[]);
+  const [collapsed,setCollapsed]=useState<Set<string>>(initialCollapsed);
   const [tab,setTab]=useState<'requirement'|'test'|'code'|'trace'>('requirement');
   const [fixture,setFixture]=useState('');
   const [mode,setMode]=useState<'mock'|'dry-run'|'sandbox'>('dry-run');
@@ -368,14 +427,23 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
   const statuses=useMemo(()=>Object.fromEntries(trace.map(t=>[t.nodeId,t.status])),[trace]);
   const activeEdges=useMemo(()=>{
     const active=new Map<string,'ok'|'rejected'>();
+    const isWithin=(nodeId:string,ancestorId:string)=>{
+      const seen=new Set<string>();
+      let current:string|null|undefined=nodeId;
+      while(current&&!seen.has(current)){
+        if(current===ancestorId)return true;
+        seen.add(current);current=byId.get(current)?.parentId;
+      }
+      return false;
+    };
     for(let i=1;i<trace.length;i++){
       const from=trace[i-1],to=trace[i];
       if(from.status==='mock'||to.status==='mock')continue;
       const handle=from.status==='rejected'?'fail':'ok';
-      for(const edge of graph.edges)if(edge.source===from.nodeId&&edge.target===to.nodeId&&(edge.sourceHandle??'ok')===handle)active.set(edge.id,from.status);
+      for(const edge of graph.edges)if(isWithin(from.nodeId,edge.source)&&isWithin(to.nodeId,edge.target)&&(edge.sourceHandle??'ok')===handle)active.set(edge.id,from.status);
     }
     return active;
-  },[graph.edges,trace]);
+  },[graph.edges,trace,byId]);
   const flowNodes=useMemo<DisplayNode[]>(()=>graph.nodes.map(n=>{
     const hasChildren=graph.nodes.some(x=>x.parentId===n.id);
     const folded=hasChildren&&collapsed.has(n.id);
@@ -408,11 +476,11 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
   const addNode=()=>{
     const id=`step-${Date.now().toString(36)}`;
     const node:Spec={id,parentId:rootId,title:'待实现功能',kind:'logic',description:'请先描述输入、处理、输出及异常。',position:{x:35,y:260},input:'Any',output:'Any',errors:[],fixture:{},code:'',test:''};
-    setGraph(g=>({...g,nodes:[...g.nodes,node]}));setCollapsed(new Set());setSelectedId(id);setFitVersion(n=>n+1);
+    setGraph(g=>({...g,nodes:[...g.nodes,node]}));setCollapsed(isExpression?old=>{const next=new Set(old);next.delete(rootId);return next}:new Set());setSelectedId(id);setFitVersion(n=>n+1);
   };
   const runSelected=async()=>{
     if(!selected)return;setError('');setBusy(true);
-    try{const input=JSON.parse(fixture);const result=await api<Run>(isSum?'/api/sum/test':isCalculator?'/api/calculator/test':'/api/test',{nodeId:selected.id,input,mode,language:selectedLanguage});setNodeResult(result);
+    try{const input=JSON.parse(fixture);const result=await api<Run>(isExpression?'/api/expression/test':isSum?'/api/sum/test':isCalculator?'/api/calculator/test':'/api/test',{nodeId:selected.id,input,mode,language:selectedLanguage});setNodeResult(result);
       if(result.trace)setTrace(result.trace);else setTrace([{nodeId:selected.id,input,output:result.output,status:result.simulated?'mock':(result.output as {status?:string})?.status==='invalid'||(result.output as {status?:string})?.status==='duplicate'?'rejected':'ok',elapsedMs:result.elapsedMs??0}]);
     }catch(e){setError(String(e))}finally{setBusy(false)};
   };
@@ -445,7 +513,7 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
       const project=toGraph(JSON.stringify(current.projectGraph));
       setTraceability(current);setTraceError('');
       if(!sameValue(graph,project)&&!window.confirm('加载项目图会替换当前浏览器画布草稿。请先导出需要保留的草稿。确定继续吗？'))return;
-      setGraph(clone(project));setGraphBase(clone(project));setSelectedId(project.nodes[0]?.id??'');setCollapsed(new Set());setTrace([]);setFitVersion(n=>n+1);
+      setGraph(clone(project));setGraphBase(clone(project));setSelectedId(project.nodes[0]?.id??'');setCollapsed(initialCollapsed());setTrace([]);setFitVersion(n=>n+1);
       setGraphMessage({tone:'success',text:'已读取项目图。'});
     }catch(e){setGraphMessage({tone:'error',text:`无法读取项目图：${String(e)}。浏览器草稿未改变。`})}finally{setGraphBusy(false)}
   };
@@ -460,13 +528,13 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
     }catch(e){setGraphMessage({tone:'error',text:`无法更新基线：${String(e)}。浏览器草稿未改变。`})}finally{setGraphBusy(false)}
   };
   const exportGraph=()=>{const blob=new Blob([JSON.stringify(graph,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`contract.${example}.json`;a.click();URL.revokeObjectURL(url)};
-  const importGraph=async(file?:File)=>{if(!file)return;try{const g=toGraph(await file.text());setGraph(g);setSelectedId(g.nodes[0]?.id??'');setTrace([]);setCollapsed(new Set());setFitVersion(n=>n+1);setGraphMessage(null)}catch(e){setGraphMessage({tone:'error',text:`无法导入画布：${String(e)}`})}};
+  const importGraph=async(file?:File)=>{if(!file)return;try{const g=toGraph(await file.text());setGraph(g);setSelectedId(g.nodes[0]?.id??'');setTrace([]);setCollapsed(initialCollapsed());setFitVersion(n=>n+1);setGraphMessage(null)}catch(e){setGraphMessage({tone:'error',text:`无法导入画布：${String(e)}`})}};
   const selectNode=(id:string)=>{setSelectedId(id);setError('')};
   const onFullRun=(run:Run)=>{setTrace(run.trace??[]);setNodeResult(run);setError('')};
   const graphStatus=!graphReady?'正在读取项目图…':traceError?'无法读取项目图，浏览器草稿仍可编辑':!graphCompatible?'画布功能与项目图不匹配':graphConflict?'项目图已变更，本地草稿未覆盖':!graphBase?'浏览器草稿缺少项目基线':graphDirty?'浏览器草稿 · 未保存到项目':'已与项目图同步';
   return <div className="studio-shell">
-    <header className="topbar"><div className="brand"><div className="brand-symbol">◇</div><div><strong>Contract Studio</strong><span>让功能可见，让实现可验</span></div></div><div className="top-actions"><button onClick={addNode} disabled={!graphReady}>＋ 添加节点</button><button onClick={()=>void saveGraph()} disabled={!graphReady||graphBusy||!!traceError||!graphCompatible||!graphBase||graphConflict||!graphDirty} className="save-project">{graphBusy?'处理中…':'保存到项目'}</button><button onClick={exportGraph}>导出 JSON</button><button onClick={()=>fileRef.current?.click()} disabled={!graphReady}>导入</button><button onClick={()=>{setGraph(clone(original));setSelectedId(defaultSelected);setCollapsed(new Set());setTrace([]);setFitVersion(n=>n+1)}} disabled={!graphReady}>重置画布</button><input hidden type="file" ref={fileRef} accept=".json,application/json" onChange={e=>{void importGraph(e.target.files?.[0]);e.target.value=''}}/></div></header>
-    <div className="subheader"><div className="example-switcher"><label htmlFor="studio-example">示例项目</label><select id="studio-example" value={example} onChange={e=>onExampleChange(e.target.value as Example)}><option value="sum">多数字求和</option><option value="calculator">四则计算器</option><option value="feedback">反馈工单</option></select></div><span className="sub-caption">需求 · 功能图 · 实现与测试</span></div>
+    <header className="topbar"><div className="brand"><div className="brand-symbol">◇</div><div><strong>Contract Studio</strong><span>让功能可见，让实现可验</span></div></div><div className="top-actions"><button onClick={addNode} disabled={!graphReady}>＋ 添加节点</button><button onClick={()=>void saveGraph()} disabled={!graphReady||graphBusy||!!traceError||!graphCompatible||!graphBase||graphConflict||!graphDirty} className="save-project">{graphBusy?'处理中…':'保存到项目'}</button><button onClick={exportGraph}>导出 JSON</button><button onClick={()=>fileRef.current?.click()} disabled={!graphReady}>导入</button><button onClick={()=>{setGraph(clone(original));setSelectedId(defaultSelected);setCollapsed(initialCollapsed());setTrace([]);setFitVersion(n=>n+1)}} disabled={!graphReady}>重置画布</button><input hidden type="file" ref={fileRef} accept=".json,application/json" onChange={e=>{void importGraph(e.target.files?.[0]);e.target.value=''}}/></div></header>
+    <div className="subheader"><div className="example-switcher"><label htmlFor="studio-example">示例项目</label><select id="studio-example" value={example} onChange={e=>onExampleChange(e.target.value as Example)}><option value="expression">混合四则运算</option><option value="sum">多数字求和</option><option value="calculator">四则计算器</option><option value="feedback">反馈工单</option></select></div><span className="sub-caption">需求 · 功能图 · 实现与测试</span></div>
     {isFeedback&&<div className="adapter-bar"><label htmlFor="adapter-lang">校验节点的后端语言</label><select id="adapter-lang" value={selectedLanguage} onChange={e=>{setSelectedLanguage(e.target.value);setNodeResult(null);setSource(null);setTrace([])}}>{(adapters.length?adapters:[{id:'javascript',label:'Node.js / JavaScript',available:true,missing:[],source:'',buildOnFirstUse:false}]).map(a=><option key={a.id} value={a.id} disabled={!a.available}>{a.label}{a.available?'':'（缺少 '+a.missing.join(', ')+'）'}</option>)}</select><span className="micro">{adapterError||'只切换「字段校验」的执行语言；其他节点保持不变。编译型语言首次运行会自动编译。'}</span></div>}
     <div className="workspace">
       <section className="canvas">
@@ -480,7 +548,7 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
         <div className="canvas-footer"><span>连线表示业务数据 / 分支，不表示调用栈或线程数量。</span><span>{graph.nodes.length} 节点 · {graph.edges.length} 条边</span></div>
       </section>
       <aside className="right-side">
-        {isSum?<SumPreview onRun={onFullRun}/>:isCalculator?<CalculatorPreview onRun={onFullRun}/>:null}
+        {isExpression?<ExpressionPreview onRun={onFullRun}/>:isSum?<SumPreview onRun={onFullRun}/>:isCalculator?<CalculatorPreview onRun={onFullRun}/>:null}
         <section className="inspector">
           <div className="panel-heading"><div><div className="eyebrow">节点检查器</div><h2>{selected?.title??'选择节点'}</h2></div><div className="degree">入 {degree.in} / 出 {degree.out}</div></div>
           {selected&&<>
@@ -515,9 +583,9 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
 export default function App(){
   const [example,setExample]=useState<Example>(()=>{
     const requested=new URLSearchParams(window.location.search).get('example');
-    if(requested==='sum'||requested==='calculator'||requested==='feedback')return requested;
+    if(requested==='expression'||requested==='sum'||requested==='calculator'||requested==='feedback')return requested;
     const previous=sessionStorage.getItem(exampleKey);
-    return previous==='sum'||previous==='feedback'?previous:'calculator';
+    return previous==='expression'||previous==='sum'||previous==='feedback'?previous:'calculator';
   });
   const changeExample=(next:Example)=>{
     sessionStorage.setItem(exampleKey,next);

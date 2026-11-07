@@ -10,6 +10,10 @@
 
 在顶部选择“多数字求和”，默认输入 1 到 20；运行后可查看总和 210、实际经过的功能节点和逐项累加过程。输入至少 3 个数字，20 是演示数量，不是上限。选择功能节点后，可以查看该节点关联的需求、源码和测试；输入无效时，工作台会显示错误而不运行累加步骤。
 
+## 展开混合运算的计算节点
+
+在顶部选择“混合四则运算”，例如 `12 + 3 × (8 - 4) ÷ 2` 的结果是 18。功能图先展示输入、计算和结果；展开“计算”节点，可查看解析和求值等子步骤。运行后查看按实际优先级执行的计算过程，并点击节点查看对应的需求、源码和测试。表达式支持括号、一元正负、加减乘除；除零或表达式无效时会显示错误。计算使用 JavaScript 浮点数，部分小数存在舍入误差。
+
 ## 从需求找到代码
 
 1. 在项目目录运行 `npm install`、`npm run dev`，打开本机页面。
@@ -17,9 +21,9 @@
 3. 同一面板列出带 `@need-ids` 标记的代码和测试；点击引用可以查看项目内相应位置的源码片段。一个需求可以关联多个位置。
 4. 对新增功能节点，创建需求并使用其 ID 在真实代码和测试中添加标记。点击“保存到项目”将画布同步到项目；新画出的节点需要另行实现和绑定，画图本身不会修改业务执行流程。
 
-反馈工单、计算器和多数字求和各有独立的需求及功能图文件：分别是 `contracts/requirements.json`、`contracts/calculator.requirements.json`、`contracts/sum.requirements.json`，以及 `contracts/feedback.json`、`contracts/calculator.json`、`contracts/sum.json`。各自的需求文件是确认状态的唯一权威来源。画布编辑先保存在浏览器本地，点击“保存到项目”后写入对应项目图；JSON 导入、导出仍可用于交换草稿。保存时如果项目图已被其他操作修改，工作台会提示冲突，避免直接覆盖。当前演示每个节点关联一条需求。
+反馈工单、计算器、多数字求和和混合运算各有独立的需求及功能图文件：分别是 `contracts/requirements.json`、`contracts/calculator.requirements.json`、`contracts/sum.requirements.json`、`contracts/expression.requirements.json`，以及 `contracts/feedback.json`、`contracts/calculator.json`、`contracts/sum.json`、`contracts/expression.json`。各自的需求文件是确认状态的唯一权威来源。画布编辑先保存在浏览器本地，点击“保存到项目”后写入对应项目图；JSON 导入、导出仍可用于交换草稿。保存时如果项目图已被其他操作修改，工作台会提示冲突，避免直接覆盖。当前演示每个节点关联一条需求。
 
-`traceability/requirements.rst`、`traceability/calculator.rst` 和 `traceability/sum.rst` 分别由对应需求和已保存的项目图生成，工作台保存时自动同步；若在工作台外修改源文件，可运行 `node scripts/export-needs.mjs` 重建。需求确认针对当前标题和描述；确认本身不代表功能图、代码或测试已验证，修改图也不会自动撤销需求确认。
+`traceability/requirements.rst`、`traceability/calculator.rst`、`traceability/sum.rst` 和 `traceability/expression.rst` 分别由对应需求和已保存的项目图生成，工作台保存时自动同步；若在工作台外修改源文件，可运行 `node scripts/export-needs.mjs` 重建。需求确认针对当前标题和描述；确认本身不代表功能图、代码或测试已验证，修改图也不会自动撤销需求确认。
 
 工作台的代码列表由本项目的本地扫描器读取标记生成；这表示找到了引用位置，并不代表测试通过。示例需求初始均为草稿，等待真实用户确认。
 
@@ -112,10 +116,12 @@ contracts/feedback.json              功能图（schema v2，验证节点带 ada
 contracts/requirements.json          需求、确认状态与功能节点的关联
 contracts/calculator*.json           计算器功能图与需求
 contracts/sum*.json                  多数字求和功能图与需求
+contracts/expression*.json           混合运算功能图与需求
 traceability/                        派生的 Sphinx-Needs 文档和工具配置
 server/traceability.mjs             需求保存、标记扫描与受限源码读取
 server/calculator.mjs               计算器真实校验、运算和结果
 server/sum.mjs                      多数字求和和逐步累加过程
+server/expression.mjs               混合运算解析、优先级和实际计算
 src/App.tsx                         React Flow + 真实表单 + Adapter 选择 + 检查器
 server/domain.mjs                   反馈业务流程：支持注入验证函数
 server/api.mjs                      本地受控 API + 代码段展示
@@ -126,6 +132,7 @@ tests/adapters.test.mjs             Adapter 契约一致性与 HTTP 测试
 tests/traceability.test.mjs         需求、项目图保存和追踪边界测试
 tests/calculator.test.mjs           计算器运算和错误路径测试
 tests/sum.test.mjs                  求和运算和错误路径测试
+tests/expression.test.mjs           混合运算优先级和错误路径测试
 .agents/skills/contract-studio/SKILL.md      给 Codex / 其他 Coding Agent 的约束
 ```
 
