@@ -32,7 +32,7 @@ uv run --python 3.12 --with sphinx --with sphinx-needs --with sphinx-codelinks s
 固定流程：**React 收集 → 字段校验 → 异步查重 → 保存 → React 页面反馈**。在顶部选择后端语言，只有“字段校验”节点通过选中语言的**真实进程**运行；其他业务节点继续使用现有 Node.js 实现。这能验证：功能图和 React 页面不变，只替换一个后端实现。
 
 - **JS、TS、Python、Go、Java、C++、PHP**：包含完整示例；原始文件包记录了在其开发环境执行契约测试的结果。
-- **Rust、C#/.NET**：包含适配器源码与配置，需要本机安装 Cargo 或 .NET 8 SDK；当前交付环境未具备相应工具链，因此**未做运行验证**。Rust 首次安装依赖可在 `server/adapters/impl/rust` 内执行 `cargo fetch`；演示运行时只允许 `cargo build --offline`。
+- **Rust、C#/.NET**：包含适配器源码与配置，需要本机安装 Cargo 或 .NET 8 SDK；原始交付记录未验证这两种语言，本次改动也未专门运行它们。Rust 首次安装依赖可在 `server/adapters/impl/rust` 内执行 `cargo fetch`；演示运行时只允许 `cargo build --offline`。
 - 缺少工具链时 UI 会把相应语言标为不可选；缺少依赖 / 编译失败会给出错误，**不会伪造测试通过**。
 
 ## 快速开始
@@ -111,6 +111,7 @@ server/adapters/index.mjs           Adapter 注册表、构建、启动、超时
 server/adapters/impl/              各语言实际实现示例
 tests/domain.test.mjs               原有 11 个业务行为测试
 tests/adapters.test.mjs             Adapter 契约一致性与 HTTP 测试
+tests/traceability.test.mjs         需求、项目图保存和追踪边界测试
 .agents/skills/contract-studio/SKILL.md      给 Codex / 其他 Coding Agent 的约束
 ```
 
