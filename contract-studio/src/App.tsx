@@ -271,6 +271,7 @@ function SumPreview({onRun}:{onRun:(run:Run)=>void}){
 
 type ExpressionStep={index:number;operator:string;operands:number[];result:number};
 type ExpressionRun=Run&{result:{status:'success'|'invalid';value?:number;message:string;steps?:ExpressionStep[]}};
+type ExpressionEngine={expression:string;busy:boolean;result:ExpressionRun|null;error:string;steps:ExpressionStep[];calculate:(value:string)=>Promise<void>;changeExpression:(value:string)=>void};
 const initialExpression='12 + 3 × (8 - 4) ÷ 2';
 function describeExpressionStep(step:ExpressionStep){
   const symbols:Record<string,string>={'+':'+','-':'−','*':'×','/':'÷','u+':'+','u-':'−'};
@@ -278,9 +279,9 @@ function describeExpressionStep(step:ExpressionStep){
   return step.operands.length===1?`${symbol}${step.operands[0]}`:step.operands.join(` ${symbol} `);
 }
 
-// @need-ids: REQ_EXPR_INPUT, REQ_EXPR_RESULT
-function ExpressionPreview({onRun}:{onRun:(run:Run)=>void}){
+function useExpressionEngine(enabled:boolean,onRun:(run:Run)=>void):ExpressionEngine{
   const [expression,setExpression]=useState(initialExpression);
+  const expressionRef=useRef(expression);expressionRef.current=expression;
   const [busy,setBusy]=useState(true);
   const [result,setResult]=useState<ExpressionRun|null>(null);
   const [error,setError]=useState('');
@@ -298,11 +299,16 @@ function ExpressionPreview({onRun}:{onRun:(run:Run)=>void}){
       setError(String(e));onRunRef.current({trace:[]});
     }finally{if(current===requestId.current)setBusy(false)}
   };
-  useEffect(()=>{void calculate(initialExpression);return()=>{requestId.current++}},[]);
+  useEffect(()=>{if(!enabled)return;void calculate(expressionRef.current);return()=>{requestId.current++}},[enabled]);
   const changeExpression=(value:string)=>{
     requestId.current++;setExpression(value);setBusy(false);setResult(null);setError('');onRunRef.current({trace:[]});
   };
-  const steps=result?.result.steps??[];
+  return {expression,busy,result,error,steps:result?.result.steps??[],calculate,changeExpression};
+}
+
+// @need-ids: REQ_EXPR_INPUT, REQ_EXPR_RESULT
+function ExpressionPreview({engine}:{engine:ExpressionEngine}){
+  const {expression,busy,result,error,steps,calculate,changeExpression}=engine;
   return <section className="preview-panel expression-panel">
     <div className="panel-heading"><div><div className="eyebrow">可操作的真实功能</div><h2>混合四则运算</h2></div><span className="calculator-badge">互动演示</span></div>
     <p className="expression-intro">输入算式，观察括号和运算优先级如何影响计算顺序。</p>
@@ -319,6 +325,64 @@ function ExpressionPreview({onRun}:{onRun:(run:Run)=>void}){
       <ol className="expression-steps">{steps.map(step=><li key={step.index}><span className="expression-step-index">{String(step.index).padStart(2,'0')}</span><span className="expression-step-equation">{describeExpressionStep(step)}</span><strong>= {step.result}</strong></li>)}</ol>
     </div>}
     {result?.result.status==='success'&&steps.length===0&&<p className="micro">算式直接给出一个数字，无需进行运算。</p>}
+  </section>;
+}
+
+// @need-ids: REQ_EXPR_INPUT, REQ_EXPR_RESULT
+function ExpressionCalculator({engine}:{engine:ExpressionEngine}){
+  const {expression,busy,result,error,calculate,changeExpression}=engine;
+  const inputRef=useRef<HTMLInputElement>(null);
+  const replace=(next:string,caret:number)=>{
+    changeExpression(next);
+    requestAnimationFrame(()=>{inputRef.current?.focus();inputRef.current?.setSelectionRange(caret,caret)});
+  };
+  const insert=(key:string)=>{
+    const input=inputRef.current;
+    const focused=document.activeElement===input;
+    const start=focused?input?.selectionStart??expression.length:expression.length;
+    const end=focused?input?.selectionEnd??start:start;
+    const complete=result?.result.status==='success'&&typeof result.result.value==='number';
+    const atEnd=start===expression.length&&end===expression.length;
+    if(complete&&atEnd&&/^[0-9.(]$/.test(key)){replace(key,key.length);return}
+    if(complete&&atEnd&&/^[+−×÷]$/.test(key)){
+      const next=String(result.result.value)+key;
+      replace(next,next.length);return;
+    }
+    replace(expression.slice(0,start)+key+expression.slice(end),start+key.length);
+  };
+  const erase=()=>{
+    const input=inputRef.current;
+    const focused=document.activeElement===input;
+    const start=focused?input?.selectionStart??expression.length:expression.length;
+    const end=focused?input?.selectionEnd??start:start;
+    if(start===end&&start===0)return;
+    const removeFrom=start===end?start-1:start;
+    replace(expression.slice(0,removeFrom)+expression.slice(end),removeFrom);
+  };
+  const clear=()=>replace('',0);
+  const keys=[
+    {label:'C',action:clear,kind:'utility',aria:'清除'},
+    {label:'⌫',action:erase,kind:'utility',aria:'退格'},
+    {label:'(',action:()=>insert('('),kind:'utility',aria:'左括号'},
+    {label:')',action:()=>insert(')'),kind:'utility',aria:'右括号'},
+    ...['7','8','9','÷','4','5','6','×','1','2','3','−','0','.','+'].map(label=>({label,action:()=>insert(label),kind:['÷','×','−','+'].includes(label)?'operator':'digit',aria:({'+':'加','−':'减','×':'乘','÷':'除','.':'小数点'} as Record<string,string>)[label]??label})),
+  ];
+  return <section className="expression-calculator" aria-labelledby="expression-calculator-title">
+    <div className="expression-calculator-heading"><div><div className="eyebrow">亲手试一试</div><h2 id="expression-calculator-title">混合运算计算器</h2></div><span>支持键盘输入</span></div>
+    <form onSubmit={event=>{event.preventDefault();void calculate(expression)}}>
+      <div className="expression-calculator-display">
+        <label htmlFor="expression-calculator-input">算式</label>
+        <input ref={inputRef} id="expression-calculator-input" aria-label="计算器算式" value={expression} onChange={event=>changeExpression(event.target.value)} onKeyDown={event=>{if(event.key==='='){event.preventDefault();void calculate(expression)}else if(event.key==='Escape'){event.preventDefault();clear()}}} placeholder="输入算式" spellCheck={false}/>
+        <div className={`expression-calculator-output ${error||result?.ui?.tone==='error'?'is-error':''}`} role="status">
+          {error?error:result?.ui?.tone==='error'?result.ui.message:typeof result?.result.value==='number'?String(result.result.value):'等待计算'}
+        </div>
+      </div>
+      <div className="expression-calculator-keys">
+        {keys.map(key=><button key={key.label} type="button" className={`expression-calculator-key ${key.kind}`} aria-label={key.aria} onMouseDown={event=>event.preventDefault()} onClick={key.action}>{key.label}</button>)}
+        <button type="submit" className="expression-calculator-key equals" aria-label="计算结果" disabled={busy}>=</button>
+      </div>
+    </form>
+    <p className="expression-calculator-hint">按运算优先级计算；Enter 或 = 计算，Esc 清空。小数可能有浮点舍入误差。</p>
   </section>;
 }
 
@@ -531,24 +595,26 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
   const importGraph=async(file?:File)=>{if(!file)return;try{const g=toGraph(await file.text());setGraph(g);setSelectedId(g.nodes[0]?.id??'');setTrace([]);setCollapsed(initialCollapsed());setFitVersion(n=>n+1);setGraphMessage(null)}catch(e){setGraphMessage({tone:'error',text:`无法导入画布：${String(e)}`})}};
   const selectNode=(id:string)=>{setSelectedId(id);setError('')};
   const onFullRun=(run:Run)=>{setTrace(run.trace??[]);setNodeResult(run);setError('')};
+  const expressionEngine=useExpressionEngine(isExpression,onFullRun);
   const graphStatus=!graphReady?'正在读取项目图…':traceError?'无法读取项目图，浏览器草稿仍可编辑':!graphCompatible?'画布功能与项目图不匹配':graphConflict?'项目图已变更，本地草稿未覆盖':!graphBase?'浏览器草稿缺少项目基线':graphDirty?'浏览器草稿 · 未保存到项目':'已与项目图同步';
   return <div className="studio-shell">
     <header className="topbar"><div className="brand"><div className="brand-symbol">◇</div><div><strong>Contract Studio</strong><span>让功能可见，让实现可验</span></div></div><div className="top-actions"><button onClick={addNode} disabled={!graphReady}>＋ 添加节点</button><button onClick={()=>void saveGraph()} disabled={!graphReady||graphBusy||!!traceError||!graphCompatible||!graphBase||graphConflict||!graphDirty} className="save-project">{graphBusy?'处理中…':'保存到项目'}</button><button onClick={exportGraph}>导出 JSON</button><button onClick={()=>fileRef.current?.click()} disabled={!graphReady}>导入</button><button onClick={()=>{setGraph(clone(original));setSelectedId(defaultSelected);setCollapsed(initialCollapsed());setTrace([]);setFitVersion(n=>n+1)}} disabled={!graphReady}>重置画布</button><input hidden type="file" ref={fileRef} accept=".json,application/json" onChange={e=>{void importGraph(e.target.files?.[0]);e.target.value=''}}/></div></header>
     <div className="subheader"><div className="example-switcher"><label htmlFor="studio-example">示例项目</label><select id="studio-example" value={example} onChange={e=>onExampleChange(e.target.value as Example)}><option value="expression">混合四则运算</option><option value="sum">多数字求和</option><option value="calculator">四则计算器</option><option value="feedback">反馈工单</option></select></div><span className="sub-caption">需求 · 功能图 · 实现与测试</span></div>
     {isFeedback&&<div className="adapter-bar"><label htmlFor="adapter-lang">校验节点的后端语言</label><select id="adapter-lang" value={selectedLanguage} onChange={e=>{setSelectedLanguage(e.target.value);setNodeResult(null);setSource(null);setTrace([])}}>{(adapters.length?adapters:[{id:'javascript',label:'Node.js / JavaScript',available:true,missing:[],source:'',buildOnFirstUse:false}]).map(a=><option key={a.id} value={a.id} disabled={!a.available}>{a.label}{a.available?'':'（缺少 '+a.missing.join(', ')+'）'}</option>)}</select><span className="micro">{adapterError||'只切换「字段校验」的执行语言；其他节点保持不变。编译型语言首次运行会自动编译。'}</span></div>}
     <div className="workspace">
-      <section className="canvas">
-        <div className="canvas-header"><strong>功能流程</strong><span>点击节点查看需求、代码与测试；双击父功能折叠 / 展开</span><button onClick={()=>toggle(rootId)}>{collapsed.has(rootId)?'展开全部':'折叠功能'}</button></div>
+      <section className={`canvas ${isExpression?'with-expression-calculator':''}`}>
+        <div className="canvas-header"><strong>功能流程</strong><span>{isExpression?'点击节点查看需求；使用左下角按钮缩放':'点击节点查看需求、代码与测试；双击父功能折叠 / 展开'}</span><button onClick={()=>toggle(rootId)}>{collapsed.has(rootId)?'展开全部':'折叠功能'}</button></div>
         <div className={`graph-sync ${graphConflict||!graphBase?'attention':''}`} role="status"><span>{graphStatus}</span><div><button onClick={refreshTraceability} disabled={!graphReady||graphBusy||traceLoading}>刷新状态</button><button onClick={()=>void loadProjectGraph()} disabled={!graphReady||graphBusy}>读取项目图</button>{graphCompatible&&(graphConflict||!graphBase)&&<button onClick={()=>void rebaseGraph()} disabled={graphBusy}>保留草稿并更新基线</button>}</div></div>
         {graphMessage&&<div className={`graph-message ${graphMessage.tone}`} role={graphMessage.tone==='error'?'alert':'status'}>{graphMessage.text}</div>}
-        <ReactFlow nodes={flowNodes} edges={flowEdges} nodesDraggable={graphReady} nodesConnectable={graphReady} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} onNodeClick={(_,n)=>selectNode(n.id)} onNodeDoubleClick={(_,n)=>{if(graph.nodes.some(x=>x.parentId===n.id))toggle(n.id)}} onPaneClick={()=>{}} fitView fitViewOptions={{padding:.06}} minZoom={.35} maxZoom={1.5} deleteKeyCode={null} defaultEdgeOptions={{type:'branch'}}>
+        <ReactFlow nodes={flowNodes} edges={flowEdges} nodesDraggable={graphReady} nodesConnectable={graphReady} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} onNodeClick={(_,n)=>selectNode(n.id)} onNodeDoubleClick={(_,n)=>{if(graph.nodes.some(x=>x.parentId===n.id))toggle(n.id)}} onPaneClick={()=>{}} fitView fitViewOptions={{padding:.06}} minZoom={.35} maxZoom={1.5} zoomOnScroll={!isExpression} preventScrolling={!isExpression} deleteKeyCode={null} defaultEdgeOptions={{type:'branch'}}>
           <Background gap={22} size={1} color="#e6ebf0"/><Controls position="bottom-left" showInteractive={false}/>
           <Fit value={fitVersion}/>
         </ReactFlow>
-        <div className="canvas-footer"><span>连线表示业务数据 / 分支，不表示调用栈或线程数量。</span><span>{graph.nodes.length} 节点 · {graph.edges.length} 条边</span></div>
+        <div className="canvas-footer"><span>{isExpression?'计算器在下方 · 连线表示业务数据 / 分支。':'连线表示业务数据 / 分支，不表示调用栈或线程数量。'}</span><span>{graph.nodes.length} 节点 · {graph.edges.length} 条边</span></div>
+        {isExpression&&<ExpressionCalculator engine={expressionEngine}/>}
       </section>
       <aside className="right-side">
-        {isExpression?<ExpressionPreview onRun={onFullRun}/>:isSum?<SumPreview onRun={onFullRun}/>:isCalculator?<CalculatorPreview onRun={onFullRun}/>:null}
+        {isExpression?<ExpressionPreview engine={expressionEngine}/>:isSum?<SumPreview onRun={onFullRun}/>:isCalculator?<CalculatorPreview onRun={onFullRun}/>:null}
         <section className="inspector">
           <div className="panel-heading"><div><div className="eyebrow">节点检查器</div><h2>{selected?.title??'选择节点'}</h2></div><div className="degree">入 {degree.in} / 出 {degree.out}</div></div>
           {selected&&<>
