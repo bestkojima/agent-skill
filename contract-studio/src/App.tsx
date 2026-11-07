@@ -113,6 +113,50 @@ function CreateRequirement({node,onCreate}:{node:Spec;onCreate:(nodeId:string,id
   </div>;
 }
 
+type SourcePreview={path:string;startLine:number;excerpt:string};
+type SourceEditor='vscode'|'notepad';
+type OpenSourceResult={opened:boolean;editor:SourceEditor;lineJumped:boolean;message:string};
+const sourceEditorKey='contract-studio-source-editor-v1';
+
+function TraceReference({reference,editor,onEditorChange}:{reference:TraceRef;editor:SourceEditor;onEditorChange:(editor:SourceEditor)=>void}){
+  const [expanded,setExpanded]=useState(false);
+  const [preview,setPreview]=useState<SourcePreview|null>(null);
+  const [loading,setLoading]=useState(false);
+  const [previewError,setPreviewError]=useState('');
+  const [opening,setOpening]=useState(false);
+  const [openMessage,setOpenMessage]=useState('');
+  const [openError,setOpenError]=useState('');
+  const loadPreview=async()=>{
+    if(loading)return;
+    setLoading(true);setPreviewError('');
+    try{setPreview(await api<SourcePreview>(`/api/traceability/source?path=${encodeURIComponent(reference.path)}&line=${reference.line}`))}
+    catch(e){setPreviewError(e instanceof Error?e.message:String(e))}
+    finally{setLoading(false)}
+  };
+  const show=()=>{if(expanded){setExpanded(false);return}setExpanded(true);if(!preview)void loadPreview()};
+  const openInEditor=async()=>{
+    setOpening(true);setOpenMessage('');setOpenError('');
+    try{const result=await api<OpenSourceResult>('/api/open-source',{path:reference.path,line:reference.line,editor});setOpenMessage(result.message)}
+    catch(e){setOpenError(e instanceof Error?e.message:String(e))}
+    finally{setOpening(false)}
+  };
+  return <div className={`trace-reference ${expanded?'is-expanded':''}`}>
+    <button type="button" className="trace-ref" aria-expanded={expanded} onClick={()=>void show()}>
+      <span>{reference.path}</span><b>第 {reference.line} 行 <span className="trace-chevron" aria-hidden="true">⌄</span></b>
+    </button>
+    <div className="trace-expand" aria-hidden={!expanded}><div className="trace-expand-inner"><div className="trace-preview-panel">
+      <div className="trace-preview-toolbar">
+        <label>打开方式<select aria-label={`选择 ${reference.path} 的编辑器`} value={editor} onChange={e=>{onEditorChange(e.target.value as SourceEditor);setOpenError('');setOpenMessage('')}}><option value="vscode">VS Code</option><option value="notepad">记事本</option></select></label>
+        <button type="button" className="trace-open" disabled={opening} onClick={()=>void openInEditor()}>{opening?'正在打开…':'在编辑器打开 ↗'}</button>
+      </div>
+      {editor==='notepad'&&<p className="trace-editor-hint">记事本打开文件后，请按 Ctrl+G 跳到第 {reference.line} 行。</p>}
+      {openError&&<div className="notice notice-error" role="alert">{openError}</div>}
+      {openMessage&&<div className="trace-open-message" role="status">{openMessage}</div>}
+      {loading?<div className="trace-preview-status" role="status">正在读取代码…</div>:previewError?<div className="notice notice-error" role="alert">无法读取代码：{previewError} <button className="link-button" onClick={()=>void loadPreview()}>重试</button></div>:preview&&<div className="trace-code" aria-label={`${preview.path} 代码预览`}><div className="trace-code-caption">代码预览 · 从第 {preview.startLine} 行</div><pre className="trace-code-lines">{preview.excerpt.split('\n').map((line,i)=>{const number=preview.startLine+i;return <span className={`trace-code-line ${number===reference.line?'is-target':''}`} key={number}><span className="trace-line-number" aria-hidden="true">{number}</span><span>{line||' '}</span></span>})}</pre></div>}
+    </div></div></div>
+  </div>;
+}
+
 function RequirementPanel({node,compatible,requirement,draft,traceability,loading,error,onRefresh,onSave,onCreate,onDraftChange,onDiscard}:{
   node:Spec;compatible:boolean;requirement?:Requirement;traceability:Traceability|null;loading:boolean;error:string;
   draft?:RequirementDraft;onDraftChange:(id:string,draft:RequirementDraft)=>void;onDiscard:(id:string)=>void;
@@ -121,8 +165,8 @@ function RequirementPanel({node,compatible,requirement,draft,traceability,loadin
 }){
   const [busy,setBusy]=useState(false);
   const [formError,setFormError]=useState('');
-  const [preview,setPreview]=useState<{path:string;startLine:number;excerpt:string}|null>(null);
-  const [previewError,setPreviewError]=useState('');
+  const [editor,setEditor]=useState<SourceEditor>(()=>{try{return localStorage.getItem(sourceEditorKey)==='notepad'?'notepad':'vscode'}catch{return 'vscode'}});
+  const changeEditor=(next:SourceEditor)=>{setEditor(next);try{localStorage.setItem(sourceEditorKey,next)}catch{/* The current selection still works in this view. */}};
   if(loading)return <div className="empty">正在读取需求与代码关联…</div>;
   if(error)return <div className="trace-unavailable"><div className="notice notice-error">无法读取需求关联：{error}</div><button className="link-button" onClick={onRefresh}>重新读取</button></div>;
   if(!traceability)return <div className="empty">尚未读取需求关联。</div>;
@@ -135,19 +179,12 @@ function RequirementPanel({node,compatible,requirement,draft,traceability,loadin
     setBusy(true);setFormError('');
     try{await onSave(requirement,title,description,action)}catch(e){setFormError(String(e))}finally{setBusy(false)}
   };
-  const showSource=async(ref:TraceRef)=>{
-    setPreview(null);setPreviewError('');
-    try{setPreview(await api<{path:string;startLine:number;excerpt:string}>(`/api/traceability/source?path=${encodeURIComponent(ref.path)}&line=${ref.line}`))}
-    catch(e){setPreviewError(String(e))}
-  };
-  const links=(label:string,refs:TraceRef[])=><div className="trace-links"><div className="trace-links-heading">{label} <span>{refs.length}</span></div>{refs.length?refs.map((ref,i)=><button className="trace-ref" key={`${ref.path}:${ref.line}:${i}`} onClick={()=>void showSource(ref)} title="查看对应源文件"><span>{ref.path}</span><b>第 {ref.line} 行 ↗</b></button>):<div className="trace-missing">尚未发现关联标记</div>}</div>;
+  const links=(label:string,refs:TraceRef[])=><div className="trace-links"><div className="trace-links-heading">{label} <span>{refs.length}</span></div>{refs.length?refs.map((ref,i)=><TraceReference key={`${ref.path}:${ref.line}:${i}`} reference={ref} editor={editor} onEditorChange={changeEditor}/>):<div className="trace-missing">尚未发现关联标记</div>}</div>;
   return <div className="requirements-body">
     <div className="requirement-meta"><span className="requirement-id">{requirement.id}</span><span className={`requirement-status ${!changed&&requirement.status==='confirmed'?'confirmed':'draft'}`}>{changed?'有未保存修改':requirement.status==='confirmed'?'已确认':'草稿 · 待确认'}</span></div>
     <div className="trace-section-title">关联证据 <span>由源码标记定位</span></div>
     {links('实现代码',requirement.code)}{links('相关测试',requirement.tests)}
     <p className="micro">列出的是发现的源码标记，不表示测试已经运行或验证通过。</p>
-    {previewError&&<div className="notice notice-error" role="alert">无法读取源码：{previewError}</div>}
-    {preview&&<div className="source-preview"><div className="source-preview-head"><b>{preview.path}</b><span>从第 {preview.startLine} 行</span><button className="link-button" onClick={()=>setPreview(null)}>关闭</button></div><pre className="source">{preview.excerpt}</pre></div>}
     <div className="field"><label htmlFor="requirement-title">需求标题</label><input id="requirement-title" value={title} onChange={e=>onDraftChange(requirement.id,{title:e.target.value,description})}/></div>
     <div className="field"><label htmlFor="requirement-description">需求描述</label><textarea id="requirement-description" rows={4} value={description} onChange={e=>onDraftChange(requirement.id,{title,description:e.target.value})}/></div>
     <div className="requirement-actions"><button onClick={()=>void save('save')} disabled={busy||!changed||!title.trim()||!description.trim()}>保存草稿</button><button className="primary-button" onClick={()=>void save('confirm')} disabled={busy||(!changed&&requirement.status==='confirmed')||!title.trim()||!description.trim()}>{busy?'保存中…':'确认这条需求'}</button>{changed&&<button className="link-button" onClick={()=>onDiscard(requirement.id)} disabled={busy}>放弃修改</button>}</div>

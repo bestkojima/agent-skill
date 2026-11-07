@@ -5,6 +5,7 @@ import { createStore, runSubmission, testNode } from './domain.mjs';
 import { adapterSource, supportedAdapters, listAdapters, runAdapter } from './adapters/index.mjs';
 import { traceability, updateRequirement, updateGraph, sourceAt, isLocalRequest, isLocalWrite, TraceError } from './traceability.mjs';
 import { runCalculation, testCalculatorNode } from './calculator.mjs';
+import { openSource } from './editor.mjs';
 import { runSum, testSumNode } from './sum.mjs';
 import { runExpression, testExpressionNode } from './expression.mjs';
 
@@ -43,6 +44,10 @@ export async function api(req, res, next) {
         return reply(res, 200, await traceability(undefined, featureId));
       }
       return reply(res, 200, await sourceAt(url.searchParams.get('path'), Number(url.searchParams.get('line'))));
+    }
+    if (req.method === 'POST' && url.pathname === '/api/open-source') {
+      if (!isLocalWrite(req) || !req.headers.origin) return reply(res, 403, {error: '仅允许本机同源页面打开编辑器'});
+      return reply(res, 200, await openSource(await jsonBody(req)));
     }
     if (req.method === 'POST' && url.pathname === '/api/traceability/requirement') {
       if (!isLocalWrite(req)) return reply(res, 403, {error: 'Only same-origin local JSON updates are allowed'});

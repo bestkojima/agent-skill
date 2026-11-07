@@ -56,6 +56,8 @@ npm run dev -- --host 127.0.0.1
 3. 同一面板列出带 `@need-ids` 标记的代码和测试；点击引用可以查看项目内相应位置的源码片段。一个需求可以关联多个位置。
 4. 对新增功能节点，创建需求并使用其 ID 在真实代码和测试中添加标记。点击“保存到项目”将画布同步到项目；新画出的节点需要另行实现和绑定，画图本身不会修改业务执行流程。
 
+展开代码或测试引用后，可选择编辑器并打开对应文件。默认 VS Code 会跳到标记所在行；Windows 记事本打开文件后，可用 `Ctrl+G` 输入显示的行号。编辑器启动功能仅供本机工作台使用。
+
 反馈工单、计算器、多数字求和和混合运算各有独立的需求及功能图文件：分别是 `contracts/requirements.json`、`contracts/calculator.requirements.json`、`contracts/sum.requirements.json`、`contracts/expression.requirements.json`，以及 `contracts/feedback.json`、`contracts/calculator.json`、`contracts/sum.json`、`contracts/expression.json`。各自的需求文件是确认状态的唯一权威来源。画布编辑先保存在浏览器本地，点击“保存到项目”后写入对应项目图；JSON 导入、导出仍可用于交换草稿。保存时如果项目图已被其他操作修改，工作台会提示冲突，避免直接覆盖。当前演示每个节点关联一条需求。
 
 `traceability/requirements.rst`、`traceability/calculator.rst`、`traceability/sum.rst` 和 `traceability/expression.rst` 分别由对应需求和已保存的项目图生成，工作台保存时自动同步；若在工作台外修改源文件，可运行 `node scripts/export-needs.mjs` 重建。需求确认针对当前标题和描述；确认本身不代表功能图、代码或测试已验证，修改图也不会自动撤销需求确认。
