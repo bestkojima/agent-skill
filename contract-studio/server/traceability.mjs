@@ -4,16 +4,23 @@ import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const requirementFile = 'contracts/requirements.json';
-const graphFile = 'contracts/feedback.json';
-const rstFile = 'traceability/requirements.rst';
+const features = Object.freeze({
+  'feedback.submit': Object.freeze({ requirementFile: 'contracts/requirements.json', graphFile: 'contracts/feedback.json', rstFile: 'traceability/requirements.rst' }),
+  'calculator.calculate': Object.freeze({ requirementFile: 'contracts/calculator.requirements.json', graphFile: 'contracts/calculator.json', rstFile: 'traceability/calculator.rst' }),
+});
+function featureConfig(featureId = 'feedback.submit') {
+  // The original entry point uses the existing feedback files regardless of
+  // their feature ID. Only the new, explicit calculator ID selects new files.
+  return features[featureId === 'calculator.calculate' ? featureId : 'feedback.submit'];
+}
 const allowedSourceExtensions = new Set(['.mjs', '.js', '.ts', '.tsx', '.cpp', '.py', '.go', '.java', '.php', '.cs', '.rs']);
 
 export class TraceError extends Error {
   constructor(message, status = 400) { super(message); this.status = status; }
 }
 
-async function loadRequirements(root) {
+async function loadRequirements(root, feature = featureConfig()) {
+  const { requirementFile } = feature;
   const data = JSON.parse(await fs.readFile(path.join(root, requirementFile), 'utf8'));
   if (data.version !== 1 || !Array.isArray(data.requirements)) throw new Error('Invalid requirements data');
   // An out-of-band edit to confirmed content must not inherit the old approval.
@@ -54,7 +61,8 @@ function validateGraph(graph, featureId) {
   return graph;
 }
 
-async function loadGraph(root, featureId) {
+async function loadGraph(root, featureId, feature = featureConfig(featureId)) {
+  const { graphFile } = feature;
   return validateGraph(JSON.parse(await fs.readFile(path.join(root, graphFile), 'utf8')), featureId);
 }
 
@@ -71,15 +79,16 @@ function validateGraphForSave(graph, featureId) {
   return graph;
 }
 
-function rstText(data, graph) {
+function rstText(data, graph, feature = featureConfig()) {
+  const { requirementFile, graphFile } = feature;
   const esc = (s) => s.replaceAll('\\', '\\\\').replaceAll('*', '\\*').replaceAll('`', '\\`').replaceAll('|', '\\|').replaceAll('_', '\\_');
   // Hex-encoded UTF-8 is reversible and collision-free, including case and punctuation.
   const functionId = (nodeId) => `FUNC_${Buffer.from(nodeId, 'utf8').toString('hex').toUpperCase()}`;
-  const lines = ['需求与功能图', '============', '', '.. 由 contracts/requirements.json 和 contracts/feedback.json 生成；请修改源文件或使用工作台，不要直接编辑。', '', '需求条目', '--------', ''];
+  const lines = ['需求与功能图', '============', '', `.. 由 ${requirementFile} 和 ${graphFile} 生成；请修改源文件或使用工作台，不要直接编辑。`, '', '需求条目', '--------', ''];
   for (const r of data.requirements) {
     lines.push(`.. req:: ${esc(r.title)}`, `   :id: ${r.id}`, `   :status: ${r.status}`, '', ...r.description.split('\n').map(line => `   ${esc(line)}`), '');
   }
-  lines.push('项目功能图', '----------', '', '仅包含 contracts/feedback.json 已持久的图；浏览器画布草稿不会自动写入此文件。', '', '.. 持久图完整快照，仅用于过期检测；来源仍以 JSON 文件为准。', `   ${JSON.stringify(graph)}`, '');
+  lines.push('项目功能图', '----------', '', `仅包含 ${graphFile} 已持久的图；浏览器画布草稿不会自动写入此文件。`, '', '.. 持久图完整快照，仅用于过期检测；来源仍以 JSON 文件为准。', `   ${JSON.stringify(graph)}`, '');
   for (const node of graph.nodes) {
     const children = graph.nodes.filter(n => n.parentId === node.id).map(n => functionId(n.id));
     const outgoing = graph.edges.filter(e => e.source === node.id);
@@ -99,11 +108,12 @@ function rstText(data, graph) {
   return lines.join('\n');
 }
 
-export async function exportNeeds(root = projectRoot) {
-  const data = await loadRequirements(root);
-  const graph = await loadGraph(root, data.featureId);
+export async function exportNeeds(root = projectRoot, featureId = 'feedback.submit') {
+  const feature = featureConfig(featureId);
+  const data = await loadRequirements(root, feature);
+  const graph = await loadGraph(root, data.featureId, feature);
   await fs.mkdir(path.join(root, 'traceability'), { recursive: true });
-  await fs.writeFile(path.join(root, rstFile), rstText(data, graph), 'utf8');
+  await fs.writeFile(path.join(root, feature.rstFile), rstText(data, graph, feature), 'utf8');
 }
 
 async function markerReferences(root) {
@@ -129,14 +139,16 @@ async function markerReferences(root) {
   return refs;
 }
 
-export async function traceability(root = projectRoot) {
-  const data = await loadRequirements(root);
-  const graph = await loadGraph(root, data.featureId);
+export async function traceability(root = projectRoot, featureId) {
+  const feature = featureConfig(featureId);
+  const data = await loadRequirements(root, feature);
+  if (featureId !== undefined && data.featureId !== featureId) throw new TraceError('需求文件的功能 ID 不匹配');
+  const graph = await loadGraph(root, data.featureId, feature);
   const refs = await markerReferences(root);
   let sphinxState = 'missing';
-  try { sphinxState = (await fs.readFile(path.join(root, rstFile), 'utf8')) === rstText(data, graph) ? 'current' : 'outdated'; }
+  try { sphinxState = (await fs.readFile(path.join(root, feature.rstFile), 'utf8')) === rstText(data, graph, feature) ? 'current' : 'outdated'; }
   catch (e) { if (e.code !== 'ENOENT') throw e; }
-  return { featureId: data.featureId, source: requirementFile, projectGraph: graph, sphinx: { path: rstFile, state: sphinxState },
+  return { featureId: data.featureId, source: feature.requirementFile, projectGraph: graph, sphinx: { path: feature.rstFile, state: sphinxState },
     requirements: data.requirements.map(r => ({ ...r,
       code: (refs.get(r.id) ?? []).filter(ref => !ref.path.startsWith('tests/')),
       tests: (refs.get(r.id) ?? []).filter(ref => ref.path.startsWith('tests/')) })) };
@@ -155,14 +167,17 @@ export function updateRequirement(body, root = projectRoot) {
     if (body.action !== 'create' && !Number.isInteger(body.revision)) throw new TraceError('Invalid revision');
     if (typeof body.title !== 'string' || !body.title.trim() || body.title.length > 200 || /[\r\n]/.test(body.title)) throw new TraceError('需求标题须为 1–200 字且不能换行');
     if (typeof body.description !== 'string' || !body.description.trim() || body.description.length > 5000) throw new TraceError('需求描述须为 1–5000 字');
-    const data = await loadRequirements(root);
+    const feature = featureConfig(body.featureId);
+    const data = await loadRequirements(root, feature);
+    const featureId = body.featureId ?? data.featureId;
+    if (data.featureId !== featureId) throw new TraceError('需求文件的功能 ID 不匹配');
     if (body.featureId && body.featureId !== data.featureId) throw new TraceError('当前功能图不匹配需求来源', 409);
     if (body.action === 'create') {
       if (body.featureId !== data.featureId || !/^REQ_[A-Z0-9_]+$/.test(body.id) || body.id.length > 100 || typeof body.nodeId !== 'string' || !/^[A-Za-z0-9_.-]{1,120}$/.test(body.nodeId)) throw new TraceError('需求 ID 或功能节点 ID 不合法');
       if (data.requirements.some(r => r.id === body.id || r.nodeId === body.nodeId)) throw new TraceError('需求 ID 或功能节点已存在', 409);
       data.requirements.push({id: body.id, nodeId: body.nodeId, title: body.title.trim(), description: body.description.trim().replaceAll('\r\n', '\n'), status: 'draft', revision: 1});
-      await persist(root, data);
-      return traceability(root);
+      await persist(root, data, feature);
+      return traceability(root, featureId);
     }
     const item = data.requirements.find(r => r.id === body.id);
     if (!item) throw new TraceError('Requirement not found', 404);
@@ -182,37 +197,39 @@ export function updateRequirement(body, root = projectRoot) {
         delete item.confirmedAt;
         delete item.confirmedText;
       }
-      await persist(root, data);
+      await persist(root, data, feature);
     } else {
       // Re-sync a missing or externally edited derived view on an explicit save.
-      await persist(root, data);
+      await persist(root, data, feature);
     }
-    return traceability(root);
+    return traceability(root, featureId);
   });
 }
 
 export function updateGraph(body, root = projectRoot) {
   return serialized(async () => {
-    const data = await loadRequirements(root);
-    if (!body || body.featureId !== data.featureId || !body.expectedGraph || !body.graph) throw new TraceError('缺少功能图或基线');
-    const current = await loadGraph(root, data.featureId);
+    if (!body || !body.featureId || !body.expectedGraph || !body.graph) throw new TraceError('缺少功能图或基线');
+    const feature = featureConfig(body.featureId);
+    const data = await loadRequirements(root, feature);
+    if (body.featureId !== data.featureId) throw new TraceError('功能图不匹配');
+    const current = await loadGraph(root, data.featureId, feature);
     if (!isDeepStrictEqual(current, body.expectedGraph)) throw new TraceError('项目图已被其他操作修改，请先处理冲突', 409);
     const graph = validateGraphForSave(body.graph, data.featureId);
-    const target = path.join(root, graphFile);
+    const target = path.join(root, feature.graphFile);
     const temp = `${target}.${process.pid}.tmp`;
     await fs.writeFile(temp, JSON.stringify(graph, null, 2) + '\n', 'utf8');
     await fs.rename(temp, target);
-    await exportNeeds(root);
-    return traceability(root);
+    await exportNeeds(root, data.featureId);
+    return traceability(root, data.featureId);
   });
 }
 
-async function persist(root, data) {
-  const target = path.join(root, requirementFile);
+async function persist(root, data, feature) {
+  const target = path.join(root, feature.requirementFile);
   const temp = `${target}.${process.pid}.tmp`;
   await fs.writeFile(temp, JSON.stringify(data, null, 2) + '\n', 'utf8');
   await fs.rename(temp, target);
-  await exportNeeds(root);
+  await exportNeeds(root, data.featureId);
 }
 
 export async function sourceAt(referencePath, line, root = projectRoot) {

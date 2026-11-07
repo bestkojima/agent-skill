@@ -4,9 +4,11 @@ import { fileURLToPath } from 'node:url';
 import { createStore, runSubmission, testNode } from './domain.mjs';
 import { adapterSource, supportedAdapters, listAdapters, runAdapter } from './adapters/index.mjs';
 import { traceability, updateRequirement, updateGraph, sourceAt, isLocalRequest, isLocalWrite, TraceError } from './traceability.mjs';
+import { runCalculation, testCalculatorNode } from './calculator.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const permitted = { submit: 'runSubmission', form: null, validate: 'validateFeedback', lookup: 'findDuplicate', save: 'saveFeedback', view: 'toUiState' };
+const calculatorSymbols = { calculator: 'runCalculation', 'calc-input': 'captureCalculatorInput', 'calc-validate': 'validateCalculatorInput', 'calc-compute': 'computeCalculator', 'calc-result': 'calculatorUi' };
 let store = createStore();
 
 async function jsonBody(req, limit = 40_000) {
@@ -30,7 +32,13 @@ export async function api(req, res, next) {
   try {
     if (req.method === 'GET' && (url.pathname === '/api/traceability' || url.pathname === '/api/traceability/source')) {
       if (!isLocalRequest(req)) return reply(res, 403, {error: 'Only same-origin local requests are allowed'});
-      if (url.pathname === '/api/traceability') return reply(res, 200, await traceability());
+      if (url.pathname === '/api/traceability') {
+        const feature = url.searchParams.get('feature');
+        if (feature && !['feedback', 'calculator'].includes(feature)) return reply(res, 404, {error: 'Unknown feature'});
+        return reply(res, 200, feature === 'calculator'
+          ? await traceability(undefined, 'calculator.calculate')
+          : await traceability());
+      }
       return reply(res, 200, await sourceAt(url.searchParams.get('path'), Number(url.searchParams.get('line'))));
     }
     if (req.method === 'POST' && url.pathname === '/api/traceability/requirement') {
@@ -43,6 +51,13 @@ export async function api(req, res, next) {
     }
     if (req.method === 'GET' && url.pathname === '/api/adapters') return reply(res, 200, { adapters: await listAdapters() });
     if (req.method === 'GET' && url.pathname === '/api/items') return reply(res, 200, { items: store.items });
+    if (req.method === 'POST' && url.pathname === '/api/calculator') {
+      return reply(res, 200, await runCalculation(await jsonBody(req)));
+    }
+    if (req.method === 'POST' && url.pathname === '/api/calculator/test') {
+      const body = await jsonBody(req);
+      return reply(res, 200, await testCalculatorNode(body.nodeId, body.input, body.mode));
+    }
     if (req.method === 'POST' && url.pathname === '/api/submit') {
       const body = await jsonBody(req);
       const language = body.language ?? 'javascript';
@@ -64,6 +79,14 @@ export async function api(req, res, next) {
     }
     if (req.method === 'GET' && url.pathname === '/api/code') {
       const id = url.searchParams.get('nodeId');
+      if (id && Object.hasOwn(calculatorSymbols, id)) {
+        const symbol = calculatorSymbols[id];
+        const source = await fs.readFile(path.join(here, 'calculator.mjs'), 'utf8');
+        const start = source.indexOf(`export ${symbol === 'runCalculation' ? 'async ' : ''}function ${symbol}(`);
+        const nextExport = source.indexOf('\nexport ', start + 10);
+        return reply(res, 200, { symbol, file:'server/calculator.mjs',
+          excerpt: start < 0 ? 'Not found' : source.slice(start, nextExport < 0 ? undefined : nextExport).trim().slice(0, 4600) });
+      }
       if (id === 'validate' && url.searchParams.has('language')) {
         const lang = url.searchParams.get('language');
         const file = adapterSource(lang);

@@ -2,6 +2,10 @@
 
 用 React Flow 把用户需求、功能节点、源码和测试放到同一张工作台里。每条需求有稳定 ID、草稿或确认状态；代码和测试使用相同 ID 建立可追踪的引用。项目保留多语言 Adapter 演示。
 
+## 先看看计算器
+
+启动后默认打开计算器：输入两个数字，选择加减乘除并点击计算，功能图会显示实际执行的节点；除数为零时会显示错误。点击图里的“校验输入”或“四则运算”，在右侧“需求关联”中查看对应需求、实现代码和测试。顶部可切换到原来的反馈工单示例。
+
 ## 从需求找到代码
 
 1. 在项目目录运行 `npm install`、`npm run dev`，打开本机页面。
@@ -9,11 +13,11 @@
 3. 同一面板列出带 `@need-ids` 标记的代码和测试；点击引用可以查看项目内相应位置的源码片段。一个需求可以关联多个位置。
 4. 对新增功能节点，创建需求并使用其 ID 在真实代码和测试中添加标记。点击“保存到项目”将画布同步到项目；新画出的节点需要另行实现和绑定，画图本身不会修改业务执行流程。
 
-`contracts/requirements.json` 是需求和确认状态的唯一权威来源；`contracts/feedback.json` 保存项目功能图。画布编辑先保存在浏览器本地，点击“保存到项目”后写入项目图；JSON 导入、导出仍可用于交换草稿。保存时如果项目图已被其他操作修改，工作台会提示冲突，避免直接覆盖。当前演示每个节点关联一条需求。
+反馈工单的需求与功能图分别保存在 `contracts/requirements.json`、`contracts/feedback.json`；计算器则保存在 `contracts/calculator.requirements.json`、`contracts/calculator.json`。各自的需求文件是确认状态的唯一权威来源。画布编辑先保存在浏览器本地，点击“保存到项目”后写入对应项目图；JSON 导入、导出仍可用于交换草稿。保存时如果项目图已被其他操作修改，工作台会提示冲突，避免直接覆盖。当前演示每个节点关联一条需求。
 
-`traceability/requirements.rst` 由需求和已保存的项目图生成，工作台保存时自动同步；若在工作台外修改源文件，可运行 `node scripts/export-needs.mjs` 重建。需求确认针对当前标题和描述；确认本身不代表功能图、代码或测试已验证，修改图也不会自动撤销需求确认。
+`traceability/requirements.rst` 和 `traceability/calculator.rst` 分别由对应需求和已保存的项目图生成，工作台保存时自动同步；若在工作台外修改源文件，可运行 `node scripts/export-needs.mjs` 重建。需求确认针对当前标题和描述；确认本身不代表功能图、代码或测试已验证，修改图也不会自动撤销需求确认。
 
-工作台的代码列表由本项目的本地扫描器读取标记生成；这表示找到了引用位置，并不代表测试通过。现阶段默认展示的六条需求都是草稿，等待真实用户确认。
+工作台的代码列表由本项目的本地扫描器读取标记生成；这表示找到了引用位置，并不代表测试通过。示例需求初始均为草稿，等待真实用户确认。
 
 ### Sphinx-Needs、CodeLinks 和 ubCode
 
@@ -102,8 +106,10 @@ Adapter Registry (明确的能力白名单)
 ```text
 contracts/feedback.json              功能图（schema v2，验证节点带 adapter 能力引用）
 contracts/requirements.json          需求、确认状态与功能节点的关联
+contracts/calculator*.json           计算器功能图与需求
 traceability/                        派生的 Sphinx-Needs 文档和工具配置
 server/traceability.mjs             需求保存、标记扫描与受限源码读取
+server/calculator.mjs               计算器真实校验、运算和结果
 src/App.tsx                         React Flow + 真实表单 + Adapter 选择 + 检查器
 server/domain.mjs                   反馈业务流程：支持注入验证函数
 server/api.mjs                      本地受控 API + 代码段展示
@@ -112,6 +118,7 @@ server/adapters/impl/              各语言实际实现示例
 tests/domain.test.mjs               原有 11 个业务行为测试
 tests/adapters.test.mjs             Adapter 契约一致性与 HTTP 测试
 tests/traceability.test.mjs         需求、项目图保存和追踪边界测试
+tests/calculator.test.mjs           计算器运算和错误路径测试
 .agents/skills/contract-studio/SKILL.md      给 Codex / 其他 Coding Agent 的约束
 ```
 

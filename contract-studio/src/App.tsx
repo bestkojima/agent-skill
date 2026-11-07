@@ -5,7 +5,8 @@ import {
   type NodeChange, type EdgeChange, type EdgeProps, useReactFlow
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import seed from '../contracts/feedback.json';
+import feedbackSeed from '../contracts/feedback.json';
+import calculatorSeed from '../contracts/calculator.json';
 
 type Kind = 'group' | 'ui' | 'logic' | 'async' | 'action';
 type Spec = {
@@ -24,11 +25,8 @@ type Requirement={id:string;nodeId:string;title:string;description:string;status
 type RequirementDraft={title:string;description:string};
 type Traceability={featureId:string;source:string;projectGraph:Graph;requirements:Requirement[];sphinx:{path:string;state:'current'|'outdated'|'missing'}};
 type DisplayNode=FlowNode<{spec:Spec;collapsed:boolean;hasChildren:boolean;run?:Step['status'];requirement?:Requirement;hasUnsavedRequirement:boolean;traceAvailable:boolean;toggle:(id:string)=>void;language:string},'contract'>;
-const original = seed as Graph;
-const JSON_KEY='contract-studio-adapters-v03';
-const GRAPH_BASE_KEY='contract-studio-project-graph-base-v1';
-const GRAPH_PENDING_KEY='contract-studio-project-graph-pending-v1';
-const REQUIREMENT_DRAFT_KEY='contract-studio-requirement-drafts-v1';
+type Example='calculator'|'feedback';
+const exampleKey='contract-studio-active-example-v1';
 const clone=<T,>(v:T):T=>JSON.parse(JSON.stringify(v)) as T;
 const toGraph=(text:string):Graph=>{
   const g:unknown=JSON.parse(text);
@@ -101,7 +99,7 @@ function CreateRequirement({node,onCreate}:{node:Spec;onCreate:(nodeId:string,id
   };
   return <div className="requirements-body">
     <div className="requirement-empty"><strong>此节点尚无需求</strong><p>为它创建一条草稿，确认前保留修改空间。</p></div>
-    <div className="field"><label htmlFor="new-req-id">需求 ID</label><input id="new-req-id" value={id} onChange={e=>setId(e.target.value)} placeholder="例如 REQ_FEEDBACK_EXPORT"/></div>
+    <div className="field"><label htmlFor="new-req-id">需求 ID</label><input id="new-req-id" value={id} onChange={e=>setId(e.target.value)} placeholder="例如 REQ_NEW_FEATURE"/></div>
     <div className="field"><label htmlFor="new-req-title">需求标题</label><input id="new-req-title" value={title} onChange={e=>setTitle(e.target.value)}/></div>
     <div className="field"><label htmlFor="new-req-description">需求描述</label><textarea id="new-req-description" rows={3} value={description} onChange={e=>setDescription(e.target.value)}/></div>
     <button className="primary-button" onClick={()=>void create()} disabled={busy||!id.trim()||!title.trim()||!description.trim()}>{busy?'创建中…':'创建并关联草稿'}</button>
@@ -186,7 +184,48 @@ function FeedbackPreview({onRun,language,adapters}:{onRun:(run:Run)=>void;langua
   </section>;
 }
 
-function Studio(){
+// @need-ids: REQ_CALC_INPUT, REQ_CALC_RESULT
+function CalculatorPreview({onRun}:{onRun:(run:Run)=>void}){
+  const [left,setLeft]=useState('6');
+  const [right,setRight]=useState('2');
+  const [operator,setOperator]=useState<'+'|'-'|'*'|'/'>('/');
+  const [busy,setBusy]=useState(false);
+  const [result,setResult]=useState<Run|null>(null);
+  const [error,setError]=useState('');
+  const calculate=async()=>{
+    setBusy(true);setError('');setResult(null);
+    try{const run=await api<Run>('/api/calculator',{left,right,operator});setResult(run);onRun(run)}
+    catch(e){setError(String(e));onRun({trace:[]})}finally{setBusy(false)}
+  };
+  return <section className="preview-panel calculator-panel">
+    <div className="panel-heading"><div><div className="eyebrow">可操作的真实功能</div><h2>四则计算器</h2></div><span className="calculator-badge">互动演示</span></div>
+    <p className="calculator-intro">输入两个数字，选择运算，再看左侧实际走过的节点。</p>
+    <form onSubmit={e=>{e.preventDefault();void calculate()}}>
+      <div className="calculator-operands">
+        <div className="field"><label htmlFor="calculator-left">第一个数</label><input id="calculator-left" inputMode="decimal" value={left} onChange={e=>setLeft(e.target.value)} placeholder="例如 6"/></div>
+        <div className="field"><label htmlFor="calculator-operator">运算</label><select id="calculator-operator" value={operator} onChange={e=>setOperator(e.target.value as '+'|'-'|'*'|'/')}><option value="+">＋ 加</option><option value="-">− 减</option><option value="*">× 乘</option><option value="/">÷ 除</option></select></div>
+        <div className="field"><label htmlFor="calculator-right">第二个数</label><input id="calculator-right" inputMode="decimal" value={right} onChange={e=>setRight(e.target.value)} placeholder="例如 2"/></div>
+      </div>
+      <button type="submit" className="primary-button full" disabled={busy}>{busy?'计算中…':'计算并观察节点'}</button>
+    </form>
+    <div className={`calculator-result ${error||result?.ui?.tone==='error'?'is-error':''}`} aria-live="polite">
+      <span>计算结果</span>
+      {error?<strong>{error}</strong>:result?.ui?<strong>{result.ui.tone==='success'&&typeof result.result?.value==='number'?result.result.value:result.ui.message}</strong>:<strong className="calculator-placeholder">结果将在这里显示</strong>}
+    </div>
+    <p className="micro">试试 6 ÷ 2，再把第二个数改为 0，观察错误分支。</p>
+  </section>;
+}
+
+function Studio({example,onExampleChange}:{example:Example;onExampleChange:(example:Example)=>void}){
+  const isCalculator=example==='calculator';
+  const original=(isCalculator?calculatorSeed:feedbackSeed) as Graph;
+  const rootId=isCalculator?'calculator':'submit';
+  const defaultSelected=isCalculator?'calc-compute':'lookup';
+  const JSON_KEY=isCalculator?'contract-studio-calculator-graph-v1':'contract-studio-adapters-v03';
+  const GRAPH_BASE_KEY=isCalculator?'contract-studio-calculator-graph-base-v1':'contract-studio-project-graph-base-v1';
+  const GRAPH_PENDING_KEY=isCalculator?'contract-studio-calculator-graph-pending-v1':'contract-studio-project-graph-pending-v1';
+  const REQUIREMENT_DRAFT_KEY=isCalculator?'contract-studio-calculator-requirement-drafts-v1':'contract-studio-requirement-drafts-v1';
+  const traceUrl=isCalculator?'/api/traceability?feature=calculator':'/api/traceability';
   const [initial]=useState(()=>{
     let graph=clone(original),hasDraft=false,base:Graph|null=null;
     try{const text=localStorage.getItem(JSON_KEY);if(text){graph=toGraph(text);hasDraft=true}}catch{/* Keep the usable bundled example. */}
@@ -201,18 +240,18 @@ function Studio(){
   const graphRef=useRef(graph);graphRef.current=graph;
   const graphBaseRef=useRef(graphBase);graphBaseRef.current=graphBase;
   const graphInitialized=useRef(false);
-  const [selectedId,setSelectedId]=useState('lookup');
+  const [selectedId,setSelectedId]=useState(defaultSelected);
   const [selectedLanguage,setSelectedLanguage]=useState('javascript');
   const [adapters,setAdapters]=useState<BackendAdapter[]>([]);
   const [adapterError,setAdapterError]=useState('');
-  useEffect(()=>{let live=true;void api<{adapters:BackendAdapter[]}>('/api/adapters').then(d=>{if(live)setAdapters(d.adapters)}).catch(e=>{if(live)setAdapterError(String(e))});return()=>{live=false}},[]);
+  useEffect(()=>{if(isCalculator)return;let live=true;void api<{adapters:BackendAdapter[]}>('/api/adapters').then(d=>{if(live)setAdapters(d.adapters)}).catch(e=>{if(live)setAdapterError(String(e))});return()=>{live=false}},[isCalculator]);
   const [traceability,setTraceability]=useState<Traceability|null>(null);
   const [requirementDrafts,setRequirementDrafts]=useState<Record<string,RequirementDraft>>(()=>{try{const saved=JSON.parse(localStorage.getItem(REQUIREMENT_DRAFT_KEY)??'{}');return saved&&typeof saved==='object'&&!Array.isArray(saved)?saved:{}}catch{return {}}});
   const [traceLoading,setTraceLoading]=useState(true);
   const [traceError,setTraceError]=useState('');
   const refreshTraceability=useCallback(()=>{
     setTraceLoading(true);setTraceError('');
-    void api<Traceability>('/api/traceability').then(data=>{
+    void api<Traceability>(traceUrl).then(data=>{
       const project=toGraph(JSON.stringify(data.projectGraph));
       setTraceability(data);
       let pending:Graph|null=null;
@@ -227,7 +266,7 @@ function Studio(){
         graphInitialized.current=true;setGraphReady(true);
       }else if(!graphBaseRef.current&&sameValue(graphRef.current,project))setGraphBase(clone(project));
     }).catch(e=>{setTraceError(String(e));graphInitialized.current=true;setGraphReady(true)}).finally(()=>setTraceLoading(false));
-  },[initial.hasDraft]);
+  },[initial.hasDraft,traceUrl,GRAPH_PENDING_KEY]);
   useEffect(()=>{refreshTraceability()},[refreshTraceability]);
   const saveRequirement=async(requirement:Requirement,title:string,description:string,action:'save'|'confirm')=>{
     const updated=await api<Traceability>('/api/traceability/requirement',{featureId:traceability?.featureId,id:requirement.id,title,description,revision:requirement.revision,action});
@@ -260,11 +299,32 @@ function Studio(){
   useEffect(()=>{localStorage.setItem(REQUIREMENT_DRAFT_KEY,JSON.stringify(requirementDrafts))},[requirementDrafts]);
   useEffect(()=>{setGraphMessage(null)},[graph]);
   useEffect(()=>{setFixture(JSON.stringify(selected?.fixture??{},null,2));setNodeResult(null);setError('');setSource(null)},[selectedId]);
-  useEffect(()=>{if(tab!=='code'||!selected)return;let live=true;void api<{file:string;symbol:string;excerpt:string}>(`/api/code?nodeId=${encodeURIComponent(selected.id)}${selected.id==='validate'?`&language=${encodeURIComponent(selectedLanguage)}`:''}`).then(d=>{if(live)setSource(d)}).catch(()=>{if(live)setSource(null)});return()=>{live=false}},[selectedId,tab,selectedLanguage]);
+  useEffect(()=>{
+    if(tab!=='code'||!selected)return;
+    let live=true;
+    if(isCalculator){
+      const ref=selectedRequirement?.code[0];
+      if(!ref){setSource(null);return()=>{live=false}}
+      void api<{path:string;excerpt:string}>(`/api/traceability/source?path=${encodeURIComponent(ref.path)}&line=${ref.line}`).then(d=>{if(live)setSource({file:d.path,symbol:selected.id,excerpt:d.excerpt})}).catch(()=>{if(live)setSource(null)});
+    }else{
+      void api<{file:string;symbol:string;excerpt:string}>(`/api/code?nodeId=${encodeURIComponent(selected.id)}${selected.id==='validate'?`&language=${encodeURIComponent(selectedLanguage)}`:''}`).then(d=>{if(live)setSource(d)}).catch(()=>{if(live)setSource(null)});
+    }
+    return()=>{live=false};
+  },[selectedId,tab,selectedLanguage,isCalculator,selectedRequirement]);
   const toggle=useCallback((id:string)=>{setCollapsed(old=>{const next=new Set(old);if(next.has(id))next.delete(id);else next.add(id);return next});setFitVersion(n=>n+1)},[]);
   const byId=useMemo(()=>new Map(graph.nodes.map(n=>[n.id,n])),[graph.nodes]);
   const hidden=useCallback((n:Spec)=>{let p=n.parentId;const walked=new Set<string>();while(p&&!walked.has(p)){if(collapsed.has(p))return true;walked.add(p);p=byId.get(p)?.parentId??null}return false},[collapsed,byId]);
   const statuses=useMemo(()=>Object.fromEntries(trace.map(t=>[t.nodeId,t.status])),[trace]);
+  const activeEdges=useMemo(()=>{
+    const active=new Map<string,'ok'|'rejected'>();
+    for(let i=1;i<trace.length;i++){
+      const from=trace[i-1],to=trace[i];
+      if(from.status==='mock'||to.status==='mock')continue;
+      const handle=from.status==='rejected'?'fail':'ok';
+      for(const edge of graph.edges)if(edge.source===from.nodeId&&edge.target===to.nodeId&&(edge.sourceHandle??'ok')===handle)active.set(edge.id,from.status);
+    }
+    return active;
+  },[graph.edges,trace]);
   const flowNodes=useMemo<DisplayNode[]>(()=>graph.nodes.map(n=>{
     const hasChildren=graph.nodes.some(x=>x.parentId===n.id);
     const folded=hasChildren&&collapsed.has(n.id);
@@ -277,9 +337,9 @@ function Studio(){
   const flowEdges=useMemo<Edge[]>(()=>graph.edges.map(e=>({
     ...e,id:e.id,sourceHandle:e.sourceHandle??'ok',targetHandle:e.targetHandle??'in',type:'branch',
     hidden:hidden(byId.get(e.source)!)||hidden(byId.get(e.target)!),
-    animated:!!statuses[e.target]&&statuses[e.target]!=='mock',style:{stroke:statuses[e.target]==='mock'?'#a87929':statuses[e.target]?'#178367':'#94a3b8',strokeWidth:1.5},
+    animated:activeEdges.has(e.id),style:{stroke:activeEdges.get(e.id)==='rejected'?'#c45f40':activeEdges.has(e.id)?'#178367':'#94a3b8',strokeWidth:activeEdges.has(e.id)?2.5:1.5},
     markerEnd:{type:MarkerType.ArrowClosed,color:'#94a3b8',width:16,height:16}
-  })),[graph.edges,byId,hidden,statuses]);
+  })),[graph.edges,byId,hidden,activeEdges]);
   const onNodesChange=useCallback((changes:NodeChange<DisplayNode>[])=>{
     setGraph(g=>{let updated=g.nodes;for(const c of changes){if(c.type==='position'&&c.position){updated=updated.map(n=>n.id===c.id?{...n,position:c.position!}:n)}}return updated===g.nodes?g:{...g,nodes:updated}});
   },[]);
@@ -293,15 +353,15 @@ function Studio(){
     setGraph(g=>({...g,edges:[...g.edges,{id,source:c.source,target:c.target,sourceHandle:c.sourceHandle??'ok',targetHandle:c.targetHandle??'in',label:c.sourceHandle==='fail'?'失败':'下一步'}]}));
   },[]);
   const update=(patch:Partial<Spec>)=>setGraph(g=>({...g,nodes:g.nodes.map(n=>n.id===selectedId?{...n,...patch}:n)}));
-  const remove=()=>{if(selectedId==='submit')return;setGraph(g=>({...g,nodes:g.nodes.filter(n=>n.id!==selectedId),edges:g.edges.filter(e=>e.source!==selectedId&&e.target!==selectedId)}));setSelectedId('submit')};
+  const remove=()=>{if(selectedId===rootId)return;setGraph(g=>({...g,nodes:g.nodes.filter(n=>n.id!==selectedId),edges:g.edges.filter(e=>e.source!==selectedId&&e.target!==selectedId)}));setSelectedId(rootId)};
   const addNode=()=>{
     const id=`step-${Date.now().toString(36)}`;
-    const node:Spec={id,parentId:'submit',title:'待实现功能',kind:'logic',description:'请先描述输入、处理、输出及异常。',position:{x:35,y:260},input:'Any',output:'Any',errors:[],fixture:{},code:'',test:''};
+    const node:Spec={id,parentId:rootId,title:'待实现功能',kind:'logic',description:'请先描述输入、处理、输出及异常。',position:{x:35,y:260},input:'Any',output:'Any',errors:[],fixture:{},code:'',test:''};
     setGraph(g=>({...g,nodes:[...g.nodes,node]}));setCollapsed(new Set());setSelectedId(id);setFitVersion(n=>n+1);
   };
   const runSelected=async()=>{
     if(!selected)return;setError('');setBusy(true);
-    try{const input=JSON.parse(fixture);const result=await api<Run>('/api/test',{nodeId:selected.id,input,mode,language:selectedLanguage});setNodeResult(result);
+    try{const input=JSON.parse(fixture);const result=await api<Run>(isCalculator?'/api/calculator/test':'/api/test',{nodeId:selected.id,input,mode,language:selectedLanguage});setNodeResult(result);
       if(result.trace)setTrace(result.trace);else setTrace([{nodeId:selected.id,input,output:result.output,status:result.simulated?'mock':(result.output as {status?:string})?.status==='invalid'||(result.output as {status?:string})?.status==='duplicate'?'rejected':'ok',elapsedMs:result.elapsedMs??0}]);
     }catch(e){setError(String(e))}finally{setBusy(false)};
   };
@@ -330,7 +390,7 @@ function Studio(){
   const loadProjectGraph=async()=>{
     setGraphBusy(true);
     try{
-      const current=await api<Traceability>('/api/traceability');
+      const current=await api<Traceability>(traceUrl);
       const project=toGraph(JSON.stringify(current.projectGraph));
       setTraceability(current);setTraceError('');
       if(!sameValue(graph,project)&&!window.confirm('加载项目图会替换当前浏览器画布草稿。请先导出需要保留的草稿。确定继续吗？'))return;
@@ -342,24 +402,24 @@ function Studio(){
     if(!window.confirm('保留当前浏览器草稿，并以最新项目图为基线？之后点击“保存到项目”会用整个草稿覆盖项目图。建议先导出并核对两份内容。'))return;
     setGraphBusy(true);
     try{
-      const current=await api<Traceability>('/api/traceability');
+      const current=await api<Traceability>(traceUrl);
       if(graph.feature?.id!==current.featureId)throw Error('当前画布功能与项目不匹配');
       setTraceability(current);setTraceError('');setGraphBase(clone(current.projectGraph));
       setGraphMessage({tone:'success',text:'已保留草稿并更新基线；确认无误后点击“保存到项目”。'});
     }catch(e){setGraphMessage({tone:'error',text:`无法更新基线：${String(e)}。浏览器草稿未改变。`})}finally{setGraphBusy(false)}
   };
-  const exportGraph=()=>{const blob=new Blob([JSON.stringify(graph,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='contract.feedback.json';a.click();URL.revokeObjectURL(url)};
+  const exportGraph=()=>{const blob=new Blob([JSON.stringify(graph,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`contract.${example}.json`;a.click();URL.revokeObjectURL(url)};
   const importGraph=async(file?:File)=>{if(!file)return;try{const g=toGraph(await file.text());setGraph(g);setSelectedId(g.nodes[0]?.id??'');setTrace([]);setCollapsed(new Set());setFitVersion(n=>n+1);setGraphMessage(null)}catch(e){setGraphMessage({tone:'error',text:`无法导入画布：${String(e)}`})}};
   const selectNode=(id:string)=>{setSelectedId(id);setError('')};
   const onFullRun=(run:Run)=>{setTrace(run.trace??[]);setNodeResult(run);setError('')};
   const graphStatus=!graphReady?'正在读取项目图…':traceError?'无法读取项目图，浏览器草稿仍可编辑':!graphCompatible?'画布功能与项目图不匹配':graphConflict?'项目图已变更，本地草稿未覆盖':!graphBase?'浏览器草稿缺少项目基线':graphDirty?'浏览器草稿 · 未保存到项目':'已与项目图同步';
   return <div className="studio-shell">
-    <header className="topbar"><div className="brand"><div className="brand-symbol">◇</div><div><strong>Contract Studio</strong><span>让功能可见，让实现可验</span></div></div><div className="top-actions"><button onClick={addNode} disabled={!graphReady}>＋ 添加节点</button><button onClick={()=>void saveGraph()} disabled={!graphReady||graphBusy||!!traceError||!graphCompatible||!graphBase||graphConflict||!graphDirty} className="save-project">{graphBusy?'处理中…':'保存到项目'}</button><button onClick={exportGraph}>导出 JSON</button><button onClick={()=>fileRef.current?.click()} disabled={!graphReady}>导入</button><button onClick={()=>{setGraph(clone(original));setSelectedId('lookup');setCollapsed(new Set());setTrace([]);setFitVersion(n=>n+1)}} disabled={!graphReady}>重置画布</button><input hidden type="file" ref={fileRef} accept=".json,application/json" onChange={e=>{void importGraph(e.target.files?.[0]);e.target.value=''}}/></div></header>
-    <div className="subheader"><span>示例项目 / <b>反馈工单</b></span><span className="sub-caption">同一份契约 · React 前端 · 多语言校验节点</span></div>
-    <div className="adapter-bar"><label htmlFor="adapter-lang">校验节点的后端语言</label><select id="adapter-lang" value={selectedLanguage} onChange={e=>{setSelectedLanguage(e.target.value);setNodeResult(null);setSource(null);setTrace([])}}>{(adapters.length?adapters:[{id:'javascript',label:'Node.js / JavaScript',available:true,missing:[],source:'',buildOnFirstUse:false}]).map(a=><option key={a.id} value={a.id} disabled={!a.available}>{a.label}{a.available?'':'（缺少 '+a.missing.join(', ')+'）'}</option>)}</select><span className="micro">{adapterError||'只切换「字段校验」的执行语言；其他节点保持不变。编译型语言首次运行会自动编译。'}</span></div>
+    <header className="topbar"><div className="brand"><div className="brand-symbol">◇</div><div><strong>Contract Studio</strong><span>让功能可见，让实现可验</span></div></div><div className="top-actions"><button onClick={addNode} disabled={!graphReady}>＋ 添加节点</button><button onClick={()=>void saveGraph()} disabled={!graphReady||graphBusy||!!traceError||!graphCompatible||!graphBase||graphConflict||!graphDirty} className="save-project">{graphBusy?'处理中…':'保存到项目'}</button><button onClick={exportGraph}>导出 JSON</button><button onClick={()=>fileRef.current?.click()} disabled={!graphReady}>导入</button><button onClick={()=>{setGraph(clone(original));setSelectedId(defaultSelected);setCollapsed(new Set());setTrace([]);setFitVersion(n=>n+1)}} disabled={!graphReady}>重置画布</button><input hidden type="file" ref={fileRef} accept=".json,application/json" onChange={e=>{void importGraph(e.target.files?.[0]);e.target.value=''}}/></div></header>
+    <div className="subheader"><div className="example-switcher"><label htmlFor="studio-example">示例项目</label><select id="studio-example" value={example} onChange={e=>onExampleChange(e.target.value as Example)}><option value="calculator">四则计算器</option><option value="feedback">反馈工单</option></select></div><span className="sub-caption">需求 · 功能图 · 实现与测试</span></div>
+    {!isCalculator&&<div className="adapter-bar"><label htmlFor="adapter-lang">校验节点的后端语言</label><select id="adapter-lang" value={selectedLanguage} onChange={e=>{setSelectedLanguage(e.target.value);setNodeResult(null);setSource(null);setTrace([])}}>{(adapters.length?adapters:[{id:'javascript',label:'Node.js / JavaScript',available:true,missing:[],source:'',buildOnFirstUse:false}]).map(a=><option key={a.id} value={a.id} disabled={!a.available}>{a.label}{a.available?'':'（缺少 '+a.missing.join(', ')+'）'}</option>)}</select><span className="micro">{adapterError||'只切换「字段校验」的执行语言；其他节点保持不变。编译型语言首次运行会自动编译。'}</span></div>}
     <div className="workspace">
       <section className="canvas">
-        <div className="canvas-header"><strong>功能流程</strong><span>点击节点查看需求、代码与测试；双击父功能折叠 / 展开</span><button onClick={()=>toggle('submit')}>{collapsed.has('submit')?'展开全部':'折叠功能'}</button></div>
+        <div className="canvas-header"><strong>功能流程</strong><span>点击节点查看需求、代码与测试；双击父功能折叠 / 展开</span><button onClick={()=>toggle(rootId)}>{collapsed.has(rootId)?'展开全部':'折叠功能'}</button></div>
         <div className={`graph-sync ${graphConflict||!graphBase?'attention':''}`} role="status"><span>{graphStatus}</span><div><button onClick={refreshTraceability} disabled={!graphReady||graphBusy||traceLoading}>刷新状态</button><button onClick={()=>void loadProjectGraph()} disabled={!graphReady||graphBusy}>读取项目图</button>{graphCompatible&&(graphConflict||!graphBase)&&<button onClick={()=>void rebaseGraph()} disabled={graphBusy}>保留草稿并更新基线</button>}</div></div>
         {graphMessage&&<div className={`graph-message ${graphMessage.tone}`} role={graphMessage.tone==='error'?'alert':'status'}>{graphMessage.text}</div>}
         <ReactFlow nodes={flowNodes} edges={flowEdges} nodesDraggable={graphReady} nodesConnectable={graphReady} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} onNodeClick={(_,n)=>selectNode(n.id)} onNodeDoubleClick={(_,n)=>{if(graph.nodes.some(x=>x.parentId===n.id))toggle(n.id)}} onPaneClick={()=>{}} fitView fitViewOptions={{padding:.06}} minZoom={.35} maxZoom={1.5} deleteKeyCode={null} defaultEdgeOptions={{type:'branch'}}>
@@ -369,6 +429,7 @@ function Studio(){
         <div className="canvas-footer"><span>连线表示业务数据 / 分支，不表示调用栈或线程数量。</span><span>{graph.nodes.length} 节点 · {graph.edges.length} 条边</span></div>
       </section>
       <aside className="right-side">
+        {isCalculator&&<CalculatorPreview onRun={onFullRun}/>}
         <section className="inspector">
           <div className="panel-heading"><div><div className="eyebrow">节点检查器</div><h2>{selected?.title??'选择节点'}</h2></div><div className="degree">入 {degree.in} / 出 {degree.out}</div></div>
           {selected&&<>
@@ -386,7 +447,7 @@ function Studio(){
               <div className="field"><label>模拟输入 JSON</label><textarea className="json-area" rows={5} spellCheck={false} value={fixture} onChange={e=>setFixture(e.target.value)}/></div>
               <button className="link-button" onClick={()=>{try{const fixtureObj=JSON.parse(fixture);if(!fixtureObj||typeof fixtureObj!=='object'||Array.isArray(fixtureObj))throw Error('Fixture 必须是对象');update({fixture:fixtureObj});setError('')}catch(e){setError(String(e))}}}>将输入保存为节点 Fixture</button>
               <div className="mode-line"><label><input type="radio" checked={mode==='mock'} onChange={()=>setMode('mock')}/> Mock</label><label><input type="radio" checked={mode==='dry-run'} onChange={()=>setMode('dry-run')}/> Dry-run</label><label><input type="radio" checked={mode==='sandbox'} onChange={()=>setMode('sandbox')}/> Sandbox</label></div>
-              <div className="row-actions"><button className="primary-button" onClick={()=>void runSelected()} disabled={busy}>{busy?'测试中…':'测试此节点'}</button>{selected.id!=='submit'&&<button onClick={remove}>删除节点</button>}</div>
+              <div className="row-actions"><button className="primary-button" onClick={()=>void runSelected()} disabled={busy}>{busy?'测试中…':'测试此节点'}</button>{selected.id!==rootId&&<button onClick={remove}>删除节点</button>}</div>
               {error&&<div className="notice notice-error">{error}</div>}
               {nodeResult&&<div className="result"><span className="result-head">运行结果 {nodeResult.simulated?'（仅 Mock）':''}{selected.id==='validate'?` · ${selectedLanguage}`:''}</span><pre>{JSON.stringify(nodeResult.output??nodeResult.result??nodeResult,null,2)}</pre></div>}
             </div>}
@@ -394,10 +455,14 @@ function Studio(){
             {tab==='code'&&<div className="inspector-body"><p className="micro">功能优先；代码映射仅是可验证证据，不展开全仓调用关系。</p><div className="code-ref">{selected.code||'尚未绑定实现'}</div><div className="code-ref">{selected.test||'尚未绑定测试'}</div>{source?<pre className="source">{source.excerpt}</pre>:<div className="empty">{selected.code?'读取源代码映射…':'新增节点尚未实现；不能假装测试通过。'}</div>}</div>}
           </>}
         </section>
-        <FeedbackPreview onRun={onFullRun} language={selectedLanguage} adapters={adapters}/>
+        {!isCalculator&&<FeedbackPreview onRun={onFullRun} language={selectedLanguage} adapters={adapters}/>}
       </aside>
     </div>
-    <footer className="footer"><span>Contract JSON 是意图；Node Runner 与页面实测才是证据。</span><span>v0.3 · 多语言 Adapter · React 前端</span></footer>
+    <footer className="footer"><span>Contract JSON 是意图；实际运行与测试才是证据。</span><span>需求追踪 · React Flow · Sphinx-Needs</span></footer>
   </div>;
 }
-export default function App(){return <ReactFlowProvider><Studio/></ReactFlowProvider>}
+export default function App(){
+  const [example,setExample]=useState<Example>(()=>sessionStorage.getItem(exampleKey)==='feedback'?'feedback':'calculator');
+  const changeExample=(next:Example)=>{sessionStorage.setItem(exampleKey,next);setExample(next)};
+  return <ReactFlowProvider key={example}><Studio example={example} onExampleChange={changeExample}/></ReactFlowProvider>;
+}

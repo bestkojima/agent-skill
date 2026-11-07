@@ -7,6 +7,7 @@ Contract Studio 需求追踪
    :maxdepth: 1
 
    requirements
+   calculator
 
 .. src-trace::
    :project: frontend
