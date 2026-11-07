@@ -21,6 +21,14 @@ Keep a feature understandable from the user's requirement through its functional
 3. **Implementation and tests.** Associate each requirement with real source and test locations. Where Sphinx-CodeLinks is adopted, use its `@need-ids:` annotations and its supported language formats; avoid claiming that an annotation proves the implementation is correct. Resolve references against actual files, report missing or stale links and distinguish code from test evidence. If code is generated or cannot be annotated, record a verifiable location using the project's existing convention.
 4. **Evidence.** Connect actual test results and runtime traces to their feature nodes when available. Clearly distinguish confirmed requirements, implementation links, test links, mock output, execution failures and unverified behaviour. Follow changes upstream and downstream, including tests and related nodes.
 
+## Make the structure usable
+
+Start with the user-facing path from input through the main capability to its result. Group a complex capability under a parent node and let the user expand it to see meaningful stages; keep containment separate from the edges that carry data or branch outcomes. Use names and input/output descriptions that explain the business action rather than exposing every function call. Preserve an existing graph’s semantics and saved edits when adding a presentation.
+
+Selecting a node should make its requirement and its actual implementation and test references easy to find. Display draft or confirmed status separately from test evidence; a discovered source marker is a link, not a test result. If a reference is absent, show that gap instead of inventing coverage. Where a runnable example is requested, connect its controls, displayed result, steps and graph highlights to the same real execution. Show errors and partial steps from that execution, and keep fixed fixtures visibly distinct from live results.
+
+Inspect the rendered view and exercise the main interaction, expanding and collapsing a group, following a requirement to source and tests, and running a representative success and failure when those capabilities are in scope. Keep any existing noninteractive or read-only use usable.
+
 ## Sphinx-Needs, CodeLinks and ubCode
 
 Sphinx-Needs defines and relates needs; Sphinx-CodeLinks can extract traceability markers from code; ubCode provides a Rust-based indexer, editor tooling, CLI and MCP for compatible projects. Choose the tools already installed and licensed for the project. Inspect their actual output before claiming they ran; a local marker scan or an exported RST file is not a Sphinx or ubCode build. Preserve multiple code and test references, and surface unsupported languages or tools rather than silently treating them as covered.

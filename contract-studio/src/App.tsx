@@ -143,16 +143,16 @@ function RequirementPanel({node,compatible,requirement,draft,traceability,loadin
   const links=(label:string,refs:TraceRef[])=><div className="trace-links"><div className="trace-links-heading">{label} <span>{refs.length}</span></div>{refs.length?refs.map((ref,i)=><button className="trace-ref" key={`${ref.path}:${ref.line}:${i}`} onClick={()=>void showSource(ref)} title="查看对应源文件"><span>{ref.path}</span><b>第 {ref.line} 行 ↗</b></button>):<div className="trace-missing">尚未发现关联标记</div>}</div>;
   return <div className="requirements-body">
     <div className="requirement-meta"><span className="requirement-id">{requirement.id}</span><span className={`requirement-status ${!changed&&requirement.status==='confirmed'?'confirmed':'draft'}`}>{changed?'有未保存修改':requirement.status==='confirmed'?'已确认':'草稿 · 待确认'}</span></div>
-    <div className="field"><label htmlFor="requirement-title">需求标题</label><input id="requirement-title" value={title} onChange={e=>onDraftChange(requirement.id,{title:e.target.value,description})}/></div>
-    <div className="field"><label htmlFor="requirement-description">需求描述</label><textarea id="requirement-description" rows={4} value={description} onChange={e=>onDraftChange(requirement.id,{title,description:e.target.value})}/></div>
-    <div className="requirement-actions"><button onClick={()=>void save('save')} disabled={busy||!changed||!title.trim()||!description.trim()}>保存草稿</button><button className="primary-button" onClick={()=>void save('confirm')} disabled={busy||(!changed&&requirement.status==='confirmed')||!title.trim()||!description.trim()}>{busy?'保存中…':'确认这条需求'}</button>{changed&&<button className="link-button" onClick={()=>onDiscard(requirement.id)} disabled={busy}>放弃修改</button>}</div>
-    <p className="micro">确认记录当前文字；修改后需重新确认。画布修改先保存在浏览器，需手动保存到项目；业务代码不会自动改写。</p>
-    {formError&&<div className="notice notice-error" role="alert">{formError} <button className="link-button" onClick={onRefresh}>重新读取</button></div>}
     <div className="trace-section-title">关联证据 <span>由源码标记定位</span></div>
     {links('实现代码',requirement.code)}{links('相关测试',requirement.tests)}
     <p className="micro">列出的是发现的源码标记，不表示测试已经运行或验证通过。</p>
     {previewError&&<div className="notice notice-error" role="alert">无法读取源码：{previewError}</div>}
     {preview&&<div className="source-preview"><div className="source-preview-head"><b>{preview.path}</b><span>从第 {preview.startLine} 行</span><button className="link-button" onClick={()=>setPreview(null)}>关闭</button></div><pre className="source">{preview.excerpt}</pre></div>}
+    <div className="field"><label htmlFor="requirement-title">需求标题</label><input id="requirement-title" value={title} onChange={e=>onDraftChange(requirement.id,{title:e.target.value,description})}/></div>
+    <div className="field"><label htmlFor="requirement-description">需求描述</label><textarea id="requirement-description" rows={4} value={description} onChange={e=>onDraftChange(requirement.id,{title,description:e.target.value})}/></div>
+    <div className="requirement-actions"><button onClick={()=>void save('save')} disabled={busy||!changed||!title.trim()||!description.trim()}>保存草稿</button><button className="primary-button" onClick={()=>void save('confirm')} disabled={busy||(!changed&&requirement.status==='confirmed')||!title.trim()||!description.trim()}>{busy?'保存中…':'确认这条需求'}</button>{changed&&<button className="link-button" onClick={()=>onDiscard(requirement.id)} disabled={busy}>放弃修改</button>}</div>
+    <p className="micro">确认记录当前文字；修改后需重新确认。画布修改先保存在浏览器，需手动保存到项目；业务代码不会自动改写。</p>
+    {formError&&<div className="notice notice-error" role="alert">{formError} <button className="link-button" onClick={onRefresh}>重新读取</button></div>}
     <div className="trace-source">需求文件：{traceability.source} · Sphinx 文档：{traceability.sphinx.state==='current'?'已同步':traceability.sphinx.state==='outdated'?'待同步':'缺失'}</div>
   </div>;
 }
@@ -329,7 +329,7 @@ function ExpressionPreview({engine}:{engine:ExpressionEngine}){
 }
 
 // @need-ids: REQ_EXPR_INPUT, REQ_EXPR_RESULT
-function ExpressionCalculator({engine}:{engine:ExpressionEngine}){
+function ExpressionCalculator({engine,onShowProcess}:{engine:ExpressionEngine;onShowProcess:()=>void}){
   const {expression,busy,result,error,calculate,changeExpression}=engine;
   const inputRef=useRef<HTMLInputElement>(null);
   const replace=(next:string,caret:number)=>{
@@ -360,6 +360,7 @@ function ExpressionCalculator({engine}:{engine:ExpressionEngine}){
     replace(expression.slice(0,removeFrom)+expression.slice(end),removeFrom);
   };
   const clear=()=>replace('',0);
+  const runCalculation=()=>{onShowProcess();void calculate(expression)};
   const keys=[
     {label:'C',action:clear,kind:'utility',aria:'清除'},
     {label:'⌫',action:erase,kind:'utility',aria:'退格'},
@@ -369,10 +370,10 @@ function ExpressionCalculator({engine}:{engine:ExpressionEngine}){
   ];
   return <section className="expression-calculator" aria-labelledby="expression-calculator-title">
     <div className="expression-calculator-heading"><div><div className="eyebrow">亲手试一试</div><h2 id="expression-calculator-title">混合运算计算器</h2></div><span>支持键盘输入</span></div>
-    <form onSubmit={event=>{event.preventDefault();void calculate(expression)}}>
+    <form onSubmit={event=>{event.preventDefault();runCalculation()}}>
       <div className="expression-calculator-display">
         <label htmlFor="expression-calculator-input">算式</label>
-        <input ref={inputRef} id="expression-calculator-input" aria-label="计算器算式" value={expression} onChange={event=>changeExpression(event.target.value)} onKeyDown={event=>{if(event.key==='='){event.preventDefault();void calculate(expression)}else if(event.key==='Escape'){event.preventDefault();clear()}}} placeholder="输入算式" spellCheck={false}/>
+        <input ref={inputRef} id="expression-calculator-input" aria-label="计算器算式" value={expression} onChange={event=>changeExpression(event.target.value)} onKeyDown={event=>{if(event.key==='='){event.preventDefault();runCalculation()}else if(event.key==='Escape'){event.preventDefault();clear()}}} placeholder="输入算式" spellCheck={false}/>
         <div className={`expression-calculator-output ${error||result?.ui?.tone==='error'?'is-error':''}`} role="status">
           {error?error:result?.ui?.tone==='error'?result.ui.message:typeof result?.result.value==='number'?String(result.result.value):'等待计算'}
         </div>
@@ -455,6 +456,7 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
   const initialCollapsed=()=>new Set<string>(isExpression?['expr-compute']:[]);
   const [collapsed,setCollapsed]=useState<Set<string>>(initialCollapsed);
   const [tab,setTab]=useState<'requirement'|'test'|'code'|'trace'>('requirement');
+  const [expressionPane,setExpressionPane]=useState<'detail'|'process'>('detail');
   const [fixture,setFixture]=useState('');
   const [mode,setMode]=useState<'mock'|'dry-run'|'sandbox'>('dry-run');
   const [nodeResult,setNodeResult]=useState<Run|null>(null);
@@ -487,6 +489,7 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
   },[selectedId,tab,selectedLanguage,isFeedback,selectedRequirement]);
   const toggle=useCallback((id:string)=>{setCollapsed(old=>{const next=new Set(old);if(next.has(id))next.delete(id);else next.add(id);return next});setFitVersion(n=>n+1)},[]);
   const byId=useMemo(()=>new Map(graph.nodes.map(n=>[n.id,n])),[graph.nodes]);
+  const toggleNode=useCallback((id:string)=>{toggle(id);if(isExpression){setSelectedId(id);setExpressionPane('detail')}},[toggle,isExpression]);
   const hidden=useCallback((n:Spec)=>{let p=n.parentId;const walked=new Set<string>();while(p&&!walked.has(p)){if(collapsed.has(p))return true;walked.add(p);p=byId.get(p)?.parentId??null}return false},[collapsed,byId]);
   const statuses=useMemo(()=>Object.fromEntries(trace.map(t=>[t.nodeId,t.status])),[trace]);
   const activeEdges=useMemo(()=>{
@@ -514,9 +517,9 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
     return {id:n.id,type:'contract',parentId:n.parentId??undefined,position:n.position,
       style:{width:hasChildren&&!folded?(n.size?.width??970):n.kind==='group'?230:176,height:hasChildren&&!folded?(n.size?.height??415):n.kind==='group'?120:116},
       hidden:hidden(n),selected:n.id===selectedId,
-      data:{spec:n,hasChildren,collapsed:folded,run:statuses[n.id],requirement:compatible&&!traceError&&!traceLoading?traceability?.requirements.find(r=>r.nodeId===n.id):undefined,hasUnsavedRequirement:compatible&&!!traceability?.requirements.some(r=>r.nodeId===n.id&&!!requirementDrafts[r.id]&&(requirementDrafts[r.id].title!==r.title||requirementDrafts[r.id].description!==r.description)),traceAvailable:compatible&&!traceError&&!traceLoading,toggle,language:selectedLanguage},
+      data:{spec:n,hasChildren,collapsed:folded,run:statuses[n.id],requirement:compatible&&!traceError&&!traceLoading?traceability?.requirements.find(r=>r.nodeId===n.id):undefined,hasUnsavedRequirement:compatible&&!!traceability?.requirements.some(r=>r.nodeId===n.id&&!!requirementDrafts[r.id]&&(requirementDrafts[r.id].title!==r.title||requirementDrafts[r.id].description!==r.description)),traceAvailable:compatible&&!traceError&&!traceLoading,toggle:toggleNode,language:selectedLanguage},
     };
-  }),[graph.nodes,collapsed,hidden,selectedId,statuses,toggle,selectedLanguage,traceability,requirementDrafts,compatible,traceError,traceLoading]);
+  }),[graph.nodes,collapsed,hidden,selectedId,statuses,toggleNode,selectedLanguage,traceability,requirementDrafts,compatible,traceError,traceLoading]);
   const flowEdges=useMemo<Edge[]>(()=>graph.edges.map(e=>({
     ...e,id:e.id,sourceHandle:e.sourceHandle??'ok',targetHandle:e.targetHandle??'in',type:'branch',
     hidden:hidden(byId.get(e.source)!)||hidden(byId.get(e.target)!),
@@ -593,7 +596,9 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
   };
   const exportGraph=()=>{const blob=new Blob([JSON.stringify(graph,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`contract.${example}.json`;a.click();URL.revokeObjectURL(url)};
   const importGraph=async(file?:File)=>{if(!file)return;try{const g=toGraph(await file.text());setGraph(g);setSelectedId(g.nodes[0]?.id??'');setTrace([]);setCollapsed(initialCollapsed());setFitVersion(n=>n+1);setGraphMessage(null)}catch(e){setGraphMessage({tone:'error',text:`无法导入画布：${String(e)}`})}};
-  const selectNode=(id:string)=>{setSelectedId(id);setError('')};
+  const selectNode=(id:string)=>{setSelectedId(id);setError('');if(isExpression)setExpressionPane('detail')};
+  const selectedPath:Spec[]=[];
+  {let current=selected;const seen=new Set<string>();while(current&&!seen.has(current.id)){seen.add(current.id);selectedPath.unshift(current);current=current.parentId?byId.get(current.parentId):undefined}}
   const onFullRun=(run:Run)=>{setTrace(run.trace??[]);setNodeResult(run);setError('')};
   const expressionEngine=useExpressionEngine(isExpression,onFullRun);
   const graphStatus=!graphReady?'正在读取项目图…':traceError?'无法读取项目图，浏览器草稿仍可编辑':!graphCompatible?'画布功能与项目图不匹配':graphConflict?'项目图已变更，本地草稿未覆盖':!graphBase?'浏览器草稿缺少项目基线':graphDirty?'浏览器草稿 · 未保存到项目':'已与项目图同步';
@@ -606,18 +611,20 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
         <div className="canvas-header"><strong>功能流程</strong><span>{isExpression?'点击节点查看需求；使用左下角按钮缩放':'点击节点查看需求、代码与测试；双击父功能折叠 / 展开'}</span><button onClick={()=>toggle(rootId)}>{collapsed.has(rootId)?'展开全部':'折叠功能'}</button></div>
         <div className={`graph-sync ${graphConflict||!graphBase?'attention':''}`} role="status"><span>{graphStatus}</span><div><button onClick={refreshTraceability} disabled={!graphReady||graphBusy||traceLoading}>刷新状态</button><button onClick={()=>void loadProjectGraph()} disabled={!graphReady||graphBusy}>读取项目图</button>{graphCompatible&&(graphConflict||!graphBase)&&<button onClick={()=>void rebaseGraph()} disabled={graphBusy}>保留草稿并更新基线</button>}</div></div>
         {graphMessage&&<div className={`graph-message ${graphMessage.tone}`} role={graphMessage.tone==='error'?'alert':'status'}>{graphMessage.text}</div>}
-        <ReactFlow nodes={flowNodes} edges={flowEdges} nodesDraggable={graphReady} nodesConnectable={graphReady} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} onNodeClick={(_,n)=>selectNode(n.id)} onNodeDoubleClick={(_,n)=>{if(graph.nodes.some(x=>x.parentId===n.id))toggle(n.id)}} onPaneClick={()=>{}} fitView fitViewOptions={{padding:.06}} minZoom={.35} maxZoom={1.5} zoomOnScroll={!isExpression} preventScrolling={!isExpression} deleteKeyCode={null} defaultEdgeOptions={{type:'branch'}}>
+        <ReactFlow nodes={flowNodes} edges={flowEdges} nodesDraggable={graphReady} nodesConnectable={graphReady} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} onNodeClick={(_,n)=>selectNode(n.id)} onNodeDoubleClick={(_,n)=>{if(graph.nodes.some(x=>x.parentId===n.id))toggleNode(n.id)}} onPaneClick={()=>{}} fitView fitViewOptions={{padding:.06}} minZoom={.35} maxZoom={1.5} zoomOnScroll={!isExpression} preventScrolling={!isExpression} deleteKeyCode={null} defaultEdgeOptions={{type:'branch'}}>
           <Background gap={22} size={1} color="#e6ebf0"/><Controls position="bottom-left" showInteractive={false}/>
           <Fit value={fitVersion}/>
         </ReactFlow>
         <div className="canvas-footer"><span>{isExpression?'计算器在下方 · 连线表示业务数据 / 分支。':'连线表示业务数据 / 分支，不表示调用栈或线程数量。'}</span><span>{graph.nodes.length} 节点 · {graph.edges.length} 条边</span></div>
-        {isExpression&&<ExpressionCalculator engine={expressionEngine}/>}
+        {isExpression&&<ExpressionCalculator engine={expressionEngine} onShowProcess={()=>setExpressionPane('process')}/>}
       </section>
-      <aside className="right-side">
-        {isExpression?<ExpressionPreview engine={expressionEngine}/>:isSum?<SumPreview onRun={onFullRun}/>:isCalculator?<CalculatorPreview onRun={onFullRun}/>:null}
-        <section className="inspector">
+      <aside className={`right-side ${isExpression?'expression-side':''}`}>
+        {isExpression&&<div className="expression-side-switch" role="group" aria-label="右侧内容"><button type="button" aria-pressed={expressionPane==='detail'} onClick={()=>setExpressionPane('detail')}>节点详情</button><button type="button" aria-pressed={expressionPane==='process'} onClick={()=>setExpressionPane('process')}>计算过程</button></div>}
+        {isExpression?<div hidden={expressionPane!=='process'}><ExpressionPreview engine={expressionEngine}/></div>:isSum?<SumPreview onRun={onFullRun}/>:isCalculator?<CalculatorPreview onRun={onFullRun}/>:null}
+        <section className="inspector" hidden={isExpression&&expressionPane!=='detail'}>
           <div className="panel-heading"><div><div className="eyebrow">节点检查器</div><h2>{selected?.title??'选择节点'}</h2></div><div className="degree">入 {degree.in} / 出 {degree.out}</div></div>
           {selected&&<>
+            {selectedPath.length>1&&<nav className="node-path" aria-label="功能层级">{selectedPath.map((part,index)=><span key={part.id}>{index>0&&<span className="path-separator" aria-hidden="true">›</span>}{index===selectedPath.length-1?<strong aria-current="location">{part.title}</strong>:<button type="button" onClick={()=>selectNode(part.id)}>{part.title}</button>}</span>)}</nav>}
             <p className="description">{selected.description}</p>
             <div className="info-pair"><span>输入</span><b>{selected.input}</b></div><div className="info-pair"><span>输出</span><b>{selected.output}</b></div>
             <div className="tabs">{(['requirement','test','trace','code'] as const).map(t=><button key={t} className={tab===t?'active':''} onClick={()=>setTab(t)}>{t==='requirement'?'需求关联':t==='test'?'测试':t==='trace'?'日志':'代码映射'}</button>)}</div>
