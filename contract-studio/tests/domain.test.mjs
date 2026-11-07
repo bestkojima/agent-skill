@@ -2,11 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createStore, validateFeedback, findDuplicate, saveFeedback, runSubmission, testNode } from '../server/domain.mjs';
 const valid={title:'想要快捷键提示',category:'feature',detail:'在页面显示 Ctrl+Enter'};
+// @need-ids: REQ_FEEDBACK_VALIDATE
 test('validation: good input',()=>assert.equal(validateFeedback(valid).status,'valid'));
 test('validation: rejects short title',()=>assert.equal(validateFeedback({...valid,title:'x'}).code,'INVALID_TITLE'));
 test('validation: rejects unknown category',()=>assert.equal(validateFeedback({...valid,category:'x'}).code,'INVALID_CATEGORY'));
+// @need-ids: REQ_FEEDBACK_LOOKUP
 test('async lookup: finds existing entry',async()=>assert.equal((await findDuplicate({title:'希望支持深色主题',category:'feature'},createStore())).status,'duplicate'));
+// @need-ids: REQ_FEEDBACK_SUBMIT
 test('dry-run: executes full chain but does not write',async()=>{const store=createStore();const before=store.items.length;const out=await runSubmission(valid,{store,mode:'dry-run'});assert.equal(out.result.status,'planned');assert.equal(store.items.length,before);assert.deepEqual(out.trace.map(t=>t.nodeId),['form','validate','lookup','save','view'])});
+// @need-ids: REQ_FEEDBACK_SAVE, REQ_FEEDBACK_VIEW
 test('sandbox: writes and yields UI update',async()=>{const store=createStore();const out=await runSubmission(valid,{store,mode:'sandbox'});assert.equal(out.result.status,'saved');assert.equal(store.items[0].title,valid.title);assert.equal(out.ui.tone,'success')});
 test('duplicate: prevents write and routes to UI',async()=>{const store=createStore();const before=store.items.length;const out=await runSubmission({title:'希望支持深色主题',category:'feature',detail:'x'},{store,mode:'sandbox'});assert.equal(out.result.status,'duplicate');assert.deepEqual(out.trace.map(t=>t.nodeId),['form','validate','lookup','view']);assert.equal(store.items.length,before)});
 test('invalid: early exit',async()=>{const out=await runSubmission({...valid,title:'x'},{mode:'dry-run'});assert.equal(out.result.status,'invalid');assert.deepEqual(out.trace.map(t=>t.nodeId),['form','validate','view'])});

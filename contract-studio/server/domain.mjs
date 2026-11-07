@@ -9,6 +9,7 @@ export function createStore() {
   ] };
 }
 
+// @need-ids: REQ_FEEDBACK_VALIDATE
 export function validateFeedback(raw) {
   const input = {
     title: String(raw?.title ?? '').trim(),
@@ -21,12 +22,14 @@ export function validateFeedback(raw) {
   return { status: 'valid', input };
 }
 
+// @need-ids: REQ_FEEDBACK_LOOKUP
 export async function findDuplicate(input, store) {
   await pause(55); // 异步等待示例：没有真正数据库或网络访问。
   const hit = store.items.find(item => item.category === input.category && item.title.toLocaleLowerCase() === input.title.toLocaleLowerCase());
   return hit ? { status: 'duplicate', existingId: hit.id, message: '发现相同标题与类别的反馈。' } : { status: 'unique' };
 }
 
+// @need-ids: REQ_FEEDBACK_SAVE
 export function saveFeedback(input, store, mode = 'dry-run') {
   if (mode === 'dry-run') return { status: 'planned', wouldSave: snapshot(input), committed: false };
   if (mode !== 'sandbox') throw new Error('Real production writes are disabled');
@@ -35,12 +38,14 @@ export function saveFeedback(input, store, mode = 'dry-run') {
   return { status: 'saved', item, committed: true, storage: 'process-memory' };
 }
 
+// @need-ids: REQ_FEEDBACK_VIEW
 export function toUiState(result) {
   if (result.status === 'saved') return { tone: 'success', message: `已新增 ${result.item.id}，列表已刷新。` };
   if (result.status === 'planned') return { tone: 'info', message: 'Dry-run 通过；未写入反馈列表。' };
   return { tone: 'error', message: result.message ?? result.code ?? '提交失败' };
 }
 
+// @need-ids: REQ_FEEDBACK_SUBMIT
 export async function runSubmission(raw, { store = createStore(), mode = 'dry-run', validator = validateFeedback, validatorLabel = 'javascript' } = {}) {
   if (!['dry-run', 'sandbox'].includes(mode)) throw new Error('Unknown mode');
   const runId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;

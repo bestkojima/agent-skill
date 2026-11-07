@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "featureId": "feedback.submit",
+  "requirements": [
+    {"id":"REQ_FEEDBACK_SUBMIT","nodeId":"submit","title":"提交反馈","description":"用户可以提交反馈，系统按顺序校验、查重并反馈结果。","status":"draft","revision":1},
+    {"id":"REQ_FEEDBACK_FORM","nodeId":"form","title":"收集反馈内容","description":"用户在表单中填写标题、分类和内容。","status":"draft","revision":1},
+    {"id":"REQ_FEEDBACK_VALIDATE","nodeId":"validate","title":"校验反馈字段","description":"校验标题长度、分类和内容长度；不合法时展示原因。","status":"draft","revision":1},
+    {"id":"REQ_FEEDBACK_LOOKUP","nodeId":"lookup","title":"检查重复反馈","description":"提交前检查相同分类和标题的反馈，重复时阻止保存。","status":"draft","revision":1},
+    {"id":"REQ_FEEDBACK_SAVE","nodeId":"save","title":"保存反馈","description":"通过校验与查重后保存反馈；演示模式明确区分预演与进程内保存。","status":"draft","revision":1},
+    {"id":"REQ_FEEDBACK_VIEW","nodeId":"view","title":"展示处理结果","description":"页面展示保存、预演、校验失败或重复反馈的结果。","status":"draft","revision":1}
+  ]
+}

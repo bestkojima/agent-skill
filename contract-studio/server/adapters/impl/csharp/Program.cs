@@ -6,6 +6,7 @@ using var json=JsonDocument.Parse(text);
 var root=json.RootElement;
 string Get(string key)=>root.TryGetProperty(key,out var item)?(item.GetString()??"").Trim():"";
 var form=new Form(Get("title"),Get("category"),Get("detail"));
+// @need-ids: REQ_FEEDBACK_VALIDATE
 object result=form.title.EnumerateRunes().Count() is <3 or >60
  ? new {status="invalid",code="INVALID_TITLE",message="标题需为 3–60 字。"}
  : form.category is not ("feature" or "bug" or "other")

@@ -3,16 +3,17 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createStore, runSubmission, testNode } from './domain.mjs';
 import { adapterSource, supportedAdapters, listAdapters, runAdapter } from './adapters/index.mjs';
+import { traceability, updateRequirement, updateGraph, sourceAt, isLocalRequest, isLocalWrite, TraceError } from './traceability.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const permitted = { submit: 'runSubmission', form: null, validate: 'validateFeedback', lookup: 'findDuplicate', save: 'saveFeedback', view: 'toUiState' };
 let store = createStore();
 
-async function jsonBody(req) {
+async function jsonBody(req, limit = 40_000) {
   let text = '';
   for await (const chunk of req) {
     text += chunk;
-    if (text.length > 40_000) throw new Error('Payload too large');
+    if (text.length > limit) throw new Error('Payload too large');
   }
   return text ? JSON.parse(text) : {};
 }
@@ -27,6 +28,19 @@ export async function api(req, res, next) {
   const url = new URL(req.url ?? '/', 'http://localhost');
   if (!url.pathname.startsWith('/api/')) return next();
   try {
+    if (req.method === 'GET' && (url.pathname === '/api/traceability' || url.pathname === '/api/traceability/source')) {
+      if (!isLocalRequest(req)) return reply(res, 403, {error: 'Only same-origin local requests are allowed'});
+      if (url.pathname === '/api/traceability') return reply(res, 200, await traceability());
+      return reply(res, 200, await sourceAt(url.searchParams.get('path'), Number(url.searchParams.get('line'))));
+    }
+    if (req.method === 'POST' && url.pathname === '/api/traceability/requirement') {
+      if (!isLocalWrite(req)) return reply(res, 403, {error: 'Only same-origin local JSON updates are allowed'});
+      return reply(res, 200, await updateRequirement(await jsonBody(req)));
+    }
+    if (req.method === 'POST' && url.pathname === '/api/traceability/graph') {
+      if (!isLocalWrite(req)) return reply(res, 403, {error: 'Only same-origin local JSON updates are allowed'});
+      return reply(res, 200, await updateGraph(await jsonBody(req, 1_000_000)));
+    }
     if (req.method === 'GET' && url.pathname === '/api/adapters') return reply(res, 200, { adapters: await listAdapters() });
     if (req.method === 'GET' && url.pathname === '/api/items') return reply(res, 200, { items: store.items });
     if (req.method === 'POST' && url.pathname === '/api/submit') {
@@ -74,6 +88,6 @@ export async function api(req, res, next) {
     }
     return reply(res, 404, { error: 'Unknown API' });
   } catch (e) {
-    return reply(res, 400, { error: e instanceof Error ? e.message : String(e) });
+    return reply(res, e instanceof TraceError ? e.status : 400, { error: e instanceof Error ? e.message : String(e) });
   }
 }

@@ -20,6 +20,7 @@ test('adapter manifest is fixed and source paths exist', async()=>{
  assert.equal(adapterSource('untrusted-shellexec'),null);
 });
 
+// @need-ids: REQ_FEEDBACK_VALIDATE
 test('all installed language adapters obey same user-facing function contract', {timeout:150000}, async t=>{
  const available=(await listAdapters()).filter(x=>x.available);
  for(const info of available){

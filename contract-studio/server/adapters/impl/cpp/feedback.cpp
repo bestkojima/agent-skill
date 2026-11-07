@@ -26,6 +26,7 @@ std::string field(const std::string& json,const std::string& key) {
 std::string trim(const std::string& s){const auto p=s.find_first_not_of(" \n\r\t");if(p==std::string::npos)return "";auto q=s.find_last_not_of(" \n\r\t");return s.substr(p,q-p+1);}
 int countCodePoints(const std::string& s){int n=0;for(unsigned char c:s)if((c&0xc0)!=0x80)++n;return n;}
 std::string esc(const std::string& s){std::string r;for(char c:s){switch(c){case '"':r+="\\\"";break;case '\\':r+="\\\\";break;case '\n':r+="\\n";break;case '\r':r+="\\r";break;case '\t':r+="\\t";break;default:r+=c;}}return r;}
+// @need-ids: REQ_FEEDBACK_VALIDATE
 int main(){try{
  const std::string json((std::istreambuf_iterator<char>(std::cin)),{});
  const auto title=trim(field(json,"title")), category=trim(field(json,"category")), detail=trim(field(json,"detail"));

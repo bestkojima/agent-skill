@@ -17,6 +17,7 @@ public class Feedback {
  }
  static String esc(String s){return s.replace("\\","\\\\").replace("\"","\\\"").replace("\n","\\n").replace("\r","\\r").replace("\t","\\t");}
  static int count(String s){return s.codePointCount(0,s.length());}
+ // @need-ids: REQ_FEEDBACK_VALIDATE
  public static void main(String[] args)throws Exception{
   String json=new String(System.in.readAllBytes(),StandardCharsets.UTF_8);
   String title=field(json,"title").trim(),category=field(json,"category").trim(),detail=field(json,"detail").trim();String out;

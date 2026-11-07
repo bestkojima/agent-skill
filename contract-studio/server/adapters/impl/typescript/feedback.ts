@@ -5,6 +5,7 @@ type Result = {status:'valid';input:Feedback}|{status:'invalid';code:string;mess
 let text='';
 process.stdin.setEncoding('utf8');
 process.stdin.on('data',(chunk:string)=>{text+=chunk});
+// @need-ids: REQ_FEEDBACK_VALIDATE
 process.stdin.on('end',()=>{
   const value=JSON.parse(text);
   const form:Feedback={title:String(value.title??'').trim(),category:String(value.category??'').trim(),detail:String(value.detail??'').trim()};

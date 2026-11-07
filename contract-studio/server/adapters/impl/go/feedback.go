@@ -1,6 +1,7 @@
 package main
 import("encoding/json";"fmt";"os";"strings";"unicode/utf8")
 type Form struct {Title string `json:"title"`; Category string `json:"category"`; Detail string `json:"detail"`}
+// @need-ids: REQ_FEEDBACK_VALIDATE
 func main(){
  var f Form
  if err:=json.NewDecoder(os.Stdin).Decode(&f);err!=nil{fmt.Fprintln(os.Stderr,err);os.Exit(2)}

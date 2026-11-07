@@ -1,5 +1,6 @@
 use serde_json::{json, Value};
 use std::io::{self, Read};
+// @need-ids: REQ_FEEDBACK_VALIDATE
 fn main() -> Result<(), Box<dyn std::error::Error>> {
  let mut body=String::new();io::stdin().read_to_string(&mut body)?;
  let v:Value=serde_json::from_str(&body)?;

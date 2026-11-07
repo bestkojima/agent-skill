@@ -1,0 +1,62 @@
+[needs.links.fulfills]
+outgoing = "fulfills"
+incoming = "fulfilled by"
+
+[needs.links.contains]
+outgoing = "contains"
+incoming = "contained by"
+
+[needs.links.flows_to]
+outgoing = "flows to"
+incoming = "flows from"
+
+[codelinks]
+set_local_url = true
+
+[codelinks.projects.frontend.source_discover]
+src_dir = "../src"
+comment_type = "ts"
+[codelinks.projects.frontend.analyse]
+get_need_id_refs = true
+
+[codelinks.projects.backend.source_discover]
+src_dir = "../server"
+comment_type = "ts"
+[codelinks.projects.backend.analyse]
+get_need_id_refs = true
+
+[codelinks.projects.tests.source_discover]
+src_dir = "../tests"
+comment_type = "ts"
+[codelinks.projects.tests.analyse]
+get_need_id_refs = true
+
+[codelinks.projects.cpp.source_discover]
+src_dir = "../server/adapters/impl/cpp"
+comment_type = "cpp"
+[codelinks.projects.cpp.analyse]
+get_need_id_refs = true
+
+[codelinks.projects.python.source_discover]
+src_dir = "../server/adapters/impl/python"
+comment_type = "python"
+[codelinks.projects.python.analyse]
+get_need_id_refs = true
+
+[codelinks.projects.go.source_discover]
+src_dir = "../server/adapters/impl/go"
+comment_type = "go"
+[codelinks.projects.go.analyse]
+get_need_id_refs = true
+
+[codelinks.projects.rust.source_discover]
+src_dir = "../server/adapters/impl/rust"
+comment_type = "rust"
+[codelinks.projects.rust.analyse]
+get_need_id_refs = true
+
+[codelinks.projects.csharp.source_discover]
+src_dir = "../server/adapters/impl/csharp"
+comment_type = "csharp"
+[codelinks.projects.csharp.analyse]
+get_need_id_refs = true

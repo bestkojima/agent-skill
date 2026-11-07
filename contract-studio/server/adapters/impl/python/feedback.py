@@ -2,6 +2,7 @@
 import json
 import sys
 
+# @need-ids: REQ_FEEDBACK_VALIDATE
 def validate(raw):
     value = {k: str(raw.get(k) or '').strip() for k in ('title', 'category', 'detail')}
     if len(value['title']) < 3 or len(value['title']) > 60:
