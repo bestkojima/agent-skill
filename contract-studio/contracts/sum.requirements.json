@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "featureId": "sum.calculate",
+  "requirements": [
+    {"id":"REQ_SUM_ALL","nodeId":"sum","title":"计算多个数字的总和","description":"用户可以输入至少 3 个数字，查看总和和每一步累加过程；有效输入数量不设 20 项上限。","status":"draft","revision":1},
+    {"id":"REQ_SUM_INPUT","nodeId":"sum-input","title":"输入多个数字","description":"用户按顺序输入多个数字；演示预填 1 至 20。","status":"draft","revision":1},
+    {"id":"REQ_SUM_VALIDATE","nodeId":"sum-validate","title":"校验输入","description":"至少提供 3 个有效有限数字；空项、非法项或超出范围的数字须明确提示位置。","status":"draft","revision":1},
+    {"id":"REQ_SUM_ACCUMULATE","nodeId":"sum-accumulate","title":"逐项累加","description":"按输入顺序把每个数加入运行中的总和，记录每一步的原总和、加数与新总和。","status":"draft","revision":1},
+    {"id":"REQ_SUM_RESULT","nodeId":"sum-result","title":"展示总和与过程","description":"展示总和和真实累加步骤；无法计算时显示错误原因。","status":"draft","revision":1}
+  ]
+}

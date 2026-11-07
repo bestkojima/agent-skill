@@ -1,0 +1,88 @@
+{
+  "version": 2,
+  "feature": {
+    "id": "sum.calculate",
+    "title": "多数字求和",
+    "goal": "输入至少三个数字，逐项累加并展示完整过程"
+  },
+  "nodes": [
+    {
+      "id": "sum",
+      "parentId": null,
+      "title": "多数字求和 · 完整功能",
+      "kind": "group",
+      "description": "输入至少 3 个数字，按顺序累加并显示每一步。",
+      "position": {"x": 50, "y": 80},
+      "size": {"width": 970, "height": 415},
+      "input": "至少 3 个数字",
+      "output": "总和与逐项累加步骤 / 错误提示",
+      "errors": ["INVALID_INPUT", "RESULT_OUT_OF_RANGE"],
+      "fixture": {"values":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]},
+      "code": "server/sum.mjs#runSum",
+      "test": "tests/sum.test.mjs"
+    },
+    {
+      "id": "sum-input",
+      "parentId": "sum",
+      "title": "输入数字",
+      "kind": "ui",
+      "description": "收集用户输入的多个数字，保留输入顺序。",
+      "position": {"x": 35, "y": 98},
+      "input": "用户输入",
+      "output": "SumDraft",
+      "errors": [],
+      "fixture": {"values":[1,2,3]},
+      "code": "server/sum.mjs#captureSumInput",
+      "test": "tests/sum.test.mjs"
+    },
+    {
+      "id": "sum-validate",
+      "parentId": "sum",
+      "title": "校验数字",
+      "kind": "logic",
+      "description": "至少输入三个有效有限数字，并指出无效项。",
+      "position": {"x": 230, "y": 98},
+      "input": "SumDraft",
+      "output": "SumInput / 错误",
+      "errors": ["INVALID_INPUT"],
+      "fixture": {"values":[1,2,3]},
+      "code": "server/sum.mjs#validateSumInput",
+      "test": "tests/sum.test.mjs"
+    },
+    {
+      "id": "sum-accumulate",
+      "parentId": "sum",
+      "title": "逐项累加",
+      "kind": "logic",
+      "description": "按输入顺序逐项累加，记录本次加数、原总和与新总和。",
+      "position": {"x": 425, "y": 98},
+      "input": "SumInput",
+      "output": "总和与逐项步骤 / 范围错误",
+      "errors": ["RESULT_OUT_OF_RANGE"],
+      "fixture": {"values":[1,2,3]},
+      "code": "server/sum.mjs#accumulateSum",
+      "test": "tests/sum.test.mjs"
+    },
+    {
+      "id": "sum-result",
+      "parentId": "sum",
+      "title": "展示结果",
+      "kind": "ui",
+      "description": "展示总和、每一步累加过程，或清楚说明错误。",
+      "position": {"x": 620, "y": 273},
+      "input": "总和与步骤 / 错误",
+      "output": "可见反馈",
+      "errors": [],
+      "fixture": {"status":"success","value":6,"message":"求和结果：6","steps":[{"index":1,"value":1,"previous":0,"total":1},{"index":2,"value":2,"previous":1,"total":3},{"index":3,"value":3,"previous":3,"total":6}]},
+      "code": "server/sum.mjs#sumUi",
+      "test": "tests/sum.test.mjs"
+    }
+  ],
+  "edges": [
+    {"id":"sum-e1","source":"sum-input","target":"sum-validate","sourceHandle":"ok","targetHandle":"in","label":"提交"},
+    {"id":"sum-e2","source":"sum-validate","target":"sum-accumulate","sourceHandle":"ok","targetHandle":"in","label":"有效"},
+    {"id":"sum-e3","source":"sum-validate","target":"sum-result","sourceHandle":"fail","targetHandle":"in","label":"输入错误"},
+    {"id":"sum-e4","source":"sum-accumulate","target":"sum-result","sourceHandle":"ok","targetHandle":"in","label":"总和"},
+    {"id":"sum-e5","source":"sum-accumulate","target":"sum-result","sourceHandle":"fail","targetHandle":"in","label":"超出范围"}
+  ]
+}

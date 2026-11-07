@@ -7,11 +7,12 @@ const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 const features = Object.freeze({
   'feedback.submit': Object.freeze({ requirementFile: 'contracts/requirements.json', graphFile: 'contracts/feedback.json', rstFile: 'traceability/requirements.rst' }),
   'calculator.calculate': Object.freeze({ requirementFile: 'contracts/calculator.requirements.json', graphFile: 'contracts/calculator.json', rstFile: 'traceability/calculator.rst' }),
+  'sum.calculate': Object.freeze({ requirementFile: 'contracts/sum.requirements.json', graphFile: 'contracts/sum.json', rstFile: 'traceability/sum.rst' }),
 });
 function featureConfig(featureId = 'feedback.submit') {
   // The original entry point uses the existing feedback files regardless of
-  // their feature ID. Only the new, explicit calculator ID selects new files.
-  return features[featureId === 'calculator.calculate' ? featureId : 'feedback.submit'];
+  // their feature ID. Only explicitly registered feature IDs select new files.
+  return features[featureId === 'calculator.calculate' || featureId === 'sum.calculate' ? featureId : 'feedback.submit'];
 }
 const allowedSourceExtensions = new Set(['.mjs', '.js', '.ts', '.tsx', '.cpp', '.py', '.go', '.java', '.php', '.cs', '.rs']);
 

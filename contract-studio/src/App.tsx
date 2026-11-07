@@ -7,6 +7,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import feedbackSeed from '../contracts/feedback.json';
 import calculatorSeed from '../contracts/calculator.json';
+import sumSeed from '../contracts/sum.json';
 
 type Kind = 'group' | 'ui' | 'logic' | 'async' | 'action';
 type Spec = {
@@ -25,7 +26,7 @@ type Requirement={id:string;nodeId:string;title:string;description:string;status
 type RequirementDraft={title:string;description:string};
 type Traceability={featureId:string;source:string;projectGraph:Graph;requirements:Requirement[];sphinx:{path:string;state:'current'|'outdated'|'missing'}};
 type DisplayNode=FlowNode<{spec:Spec;collapsed:boolean;hasChildren:boolean;run?:Step['status'];requirement?:Requirement;hasUnsavedRequirement:boolean;traceAvailable:boolean;toggle:(id:string)=>void;language:string},'contract'>;
-type Example='calculator'|'feedback';
+type Example='sum'|'calculator'|'feedback';
 const exampleKey='contract-studio-active-example-v1';
 const clone=<T,>(v:T):T=>JSON.parse(JSON.stringify(v)) as T;
 const toGraph=(text:string):Graph=>{
@@ -216,16 +217,66 @@ function CalculatorPreview({onRun}:{onRun:(run:Run)=>void}){
   </section>;
 }
 
+type SumStep={index:number;value:number;previous:number;total:number};
+type SumRun=Run&{result:{status:'success'|'invalid';value?:number;message:string;steps?:SumStep[]}};
+const initialSumValues=Array.from({length:20},(_,i)=>String(i+1));
+const splitSumValues=(text:string)=>text.trim().split(/[,，][ \t]*(?:\r?\n[ \t]*)?|\r?\n/).map(value=>value.trim());
+
+// @need-ids: REQ_SUM_INPUT, REQ_SUM_RESULT
+function SumPreview({onRun}:{onRun:(run:Run)=>void}){
+  const [text,setText]=useState(initialSumValues.join(', '));
+  const [busy,setBusy]=useState(true);
+  const [result,setResult]=useState<SumRun|null>(null);
+  const [error,setError]=useState('');
+  const requestId=useRef(0);
+  const onRunRef=useRef(onRun);onRunRef.current=onRun;
+  const calculate=async(values:string[])=>{
+    const current=++requestId.current;
+    setBusy(true);setError('');setResult(null);
+    try{
+      const run=await api<SumRun>('/api/sum',{values});
+      if(current!==requestId.current)return;
+      setResult(run);onRunRef.current(run);
+    }catch(e){
+      if(current!==requestId.current)return;
+      setError(String(e));onRunRef.current({trace:[]});
+    }finally{if(current===requestId.current)setBusy(false)}
+  };
+  useEffect(()=>{void calculate(initialSumValues);return()=>{requestId.current++}},[]);
+  const changeText=(value:string)=>{
+    requestId.current++;setText(value);setBusy(false);setResult(null);setError('');onRunRef.current({trace:[]});
+  };
+  const steps=result?.result.steps??[];
+  return <section className="preview-panel sum-panel">
+    <div className="panel-heading"><div><div className="eyebrow">可操作的真实功能</div><h2>多数字求和</h2></div><span className="calculator-badge">互动演示</span></div>
+    <p className="sum-intro">输入至少 3 个数字，看看它们是怎样一步步加起来的。</p>
+    <form onSubmit={event=>{event.preventDefault();void calculate(splitSumValues(text))}}>
+      <div className="field sum-input"><label htmlFor="sum-values">数字列表 <span>用逗号或换行分隔</span></label><textarea id="sum-values" rows={3} value={text} onChange={event=>changeText(event.target.value)} placeholder="例如 1, 2, 3" spellCheck={false}/></div>
+      <button type="submit" className="primary-button full" disabled={busy}>{busy?'正在计算…':'计算总和并观察节点'}</button>
+    </form>
+    <div className={`sum-result ${error||result?.ui?.tone==='error'?'is-error':''}`} role="status">
+      <span>总和</span>
+      {error?<strong>{error}</strong>:result?.ui?.tone==='error'?<strong>{result.ui.message}</strong>:typeof result?.result.value==='number'?<strong>{result.result.value}</strong>:<strong className="sum-placeholder">输入数字后计算</strong>}
+    </div>
+    {steps.length>0&&<div className="sum-process">
+      <div className="sum-process-heading"><strong>逐步累加</strong><span>共 {steps.length} 步 · 实际计算结果</span></div>
+      <ol className="sum-steps">{steps.map(step=><li key={step.index}><span className="sum-step-index">{String(step.index).padStart(2,'0')}</span><span className="sum-step-equation">{step.previous} <span>+</span> {step.value}</span><strong>= {step.total}</strong></li>)}</ol>
+    </div>}
+  </section>;
+}
+
 function Studio({example,onExampleChange}:{example:Example;onExampleChange:(example:Example)=>void}){
   const isCalculator=example==='calculator';
-  const original=(isCalculator?calculatorSeed:feedbackSeed) as Graph;
-  const rootId=isCalculator?'calculator':'submit';
-  const defaultSelected=isCalculator?'calc-compute':'lookup';
-  const JSON_KEY=isCalculator?'contract-studio-calculator-graph-v1':'contract-studio-adapters-v03';
-  const GRAPH_BASE_KEY=isCalculator?'contract-studio-calculator-graph-base-v1':'contract-studio-project-graph-base-v1';
-  const GRAPH_PENDING_KEY=isCalculator?'contract-studio-calculator-graph-pending-v1':'contract-studio-project-graph-pending-v1';
-  const REQUIREMENT_DRAFT_KEY=isCalculator?'contract-studio-calculator-requirement-drafts-v1':'contract-studio-requirement-drafts-v1';
-  const traceUrl=isCalculator?'/api/traceability?feature=calculator':'/api/traceability';
+  const isSum=example==='sum';
+  const isFeedback=example==='feedback';
+  const original=(isSum?sumSeed:isCalculator?calculatorSeed:feedbackSeed) as Graph;
+  const rootId=isSum?'sum':isCalculator?'calculator':'submit';
+  const defaultSelected=isSum?'sum-accumulate':isCalculator?'calc-compute':'lookup';
+  const JSON_KEY=isSum?'contract-studio-sum-graph-v1':isCalculator?'contract-studio-calculator-graph-v1':'contract-studio-adapters-v03';
+  const GRAPH_BASE_KEY=isSum?'contract-studio-sum-graph-base-v1':isCalculator?'contract-studio-calculator-graph-base-v1':'contract-studio-project-graph-base-v1';
+  const GRAPH_PENDING_KEY=isSum?'contract-studio-sum-graph-pending-v1':isCalculator?'contract-studio-calculator-graph-pending-v1':'contract-studio-project-graph-pending-v1';
+  const REQUIREMENT_DRAFT_KEY=isSum?'contract-studio-sum-requirement-drafts-v1':isCalculator?'contract-studio-calculator-requirement-drafts-v1':'contract-studio-requirement-drafts-v1';
+  const traceUrl=isSum?'/api/traceability?feature=sum':isCalculator?'/api/traceability?feature=calculator':'/api/traceability';
   const [initial]=useState(()=>{
     let graph=clone(original),hasDraft=false,base:Graph|null=null;
     try{const text=localStorage.getItem(JSON_KEY);if(text){graph=toGraph(text);hasDraft=true}}catch{/* Keep the usable bundled example. */}
@@ -244,7 +295,7 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
   const [selectedLanguage,setSelectedLanguage]=useState('javascript');
   const [adapters,setAdapters]=useState<BackendAdapter[]>([]);
   const [adapterError,setAdapterError]=useState('');
-  useEffect(()=>{if(isCalculator)return;let live=true;void api<{adapters:BackendAdapter[]}>('/api/adapters').then(d=>{if(live)setAdapters(d.adapters)}).catch(e=>{if(live)setAdapterError(String(e))});return()=>{live=false}},[isCalculator]);
+  useEffect(()=>{if(!isFeedback)return;let live=true;void api<{adapters:BackendAdapter[]}>('/api/adapters').then(d=>{if(live)setAdapters(d.adapters)}).catch(e=>{if(live)setAdapterError(String(e))});return()=>{live=false}},[isFeedback]);
   const [traceability,setTraceability]=useState<Traceability|null>(null);
   const [requirementDrafts,setRequirementDrafts]=useState<Record<string,RequirementDraft>>(()=>{try{const saved=JSON.parse(localStorage.getItem(REQUIREMENT_DRAFT_KEY)??'{}');return saved&&typeof saved==='object'&&!Array.isArray(saved)?saved:{}}catch{return {}}});
   const [traceLoading,setTraceLoading]=useState(true);
@@ -302,7 +353,7 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
   useEffect(()=>{
     if(tab!=='code'||!selected)return;
     let live=true;
-    if(isCalculator){
+    if(!isFeedback){
       const ref=selectedRequirement?.code[0];
       if(!ref){setSource(null);return()=>{live=false}}
       void api<{path:string;excerpt:string}>(`/api/traceability/source?path=${encodeURIComponent(ref.path)}&line=${ref.line}`).then(d=>{if(live)setSource({file:d.path,symbol:selected.id,excerpt:d.excerpt})}).catch(()=>{if(live)setSource(null)});
@@ -310,7 +361,7 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
       void api<{file:string;symbol:string;excerpt:string}>(`/api/code?nodeId=${encodeURIComponent(selected.id)}${selected.id==='validate'?`&language=${encodeURIComponent(selectedLanguage)}`:''}`).then(d=>{if(live)setSource(d)}).catch(()=>{if(live)setSource(null)});
     }
     return()=>{live=false};
-  },[selectedId,tab,selectedLanguage,isCalculator,selectedRequirement]);
+  },[selectedId,tab,selectedLanguage,isFeedback,selectedRequirement]);
   const toggle=useCallback((id:string)=>{setCollapsed(old=>{const next=new Set(old);if(next.has(id))next.delete(id);else next.add(id);return next});setFitVersion(n=>n+1)},[]);
   const byId=useMemo(()=>new Map(graph.nodes.map(n=>[n.id,n])),[graph.nodes]);
   const hidden=useCallback((n:Spec)=>{let p=n.parentId;const walked=new Set<string>();while(p&&!walked.has(p)){if(collapsed.has(p))return true;walked.add(p);p=byId.get(p)?.parentId??null}return false},[collapsed,byId]);
@@ -361,7 +412,7 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
   };
   const runSelected=async()=>{
     if(!selected)return;setError('');setBusy(true);
-    try{const input=JSON.parse(fixture);const result=await api<Run>(isCalculator?'/api/calculator/test':'/api/test',{nodeId:selected.id,input,mode,language:selectedLanguage});setNodeResult(result);
+    try{const input=JSON.parse(fixture);const result=await api<Run>(isSum?'/api/sum/test':isCalculator?'/api/calculator/test':'/api/test',{nodeId:selected.id,input,mode,language:selectedLanguage});setNodeResult(result);
       if(result.trace)setTrace(result.trace);else setTrace([{nodeId:selected.id,input,output:result.output,status:result.simulated?'mock':(result.output as {status?:string})?.status==='invalid'||(result.output as {status?:string})?.status==='duplicate'?'rejected':'ok',elapsedMs:result.elapsedMs??0}]);
     }catch(e){setError(String(e))}finally{setBusy(false)};
   };
@@ -415,8 +466,8 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
   const graphStatus=!graphReady?'正在读取项目图…':traceError?'无法读取项目图，浏览器草稿仍可编辑':!graphCompatible?'画布功能与项目图不匹配':graphConflict?'项目图已变更，本地草稿未覆盖':!graphBase?'浏览器草稿缺少项目基线':graphDirty?'浏览器草稿 · 未保存到项目':'已与项目图同步';
   return <div className="studio-shell">
     <header className="topbar"><div className="brand"><div className="brand-symbol">◇</div><div><strong>Contract Studio</strong><span>让功能可见，让实现可验</span></div></div><div className="top-actions"><button onClick={addNode} disabled={!graphReady}>＋ 添加节点</button><button onClick={()=>void saveGraph()} disabled={!graphReady||graphBusy||!!traceError||!graphCompatible||!graphBase||graphConflict||!graphDirty} className="save-project">{graphBusy?'处理中…':'保存到项目'}</button><button onClick={exportGraph}>导出 JSON</button><button onClick={()=>fileRef.current?.click()} disabled={!graphReady}>导入</button><button onClick={()=>{setGraph(clone(original));setSelectedId(defaultSelected);setCollapsed(new Set());setTrace([]);setFitVersion(n=>n+1)}} disabled={!graphReady}>重置画布</button><input hidden type="file" ref={fileRef} accept=".json,application/json" onChange={e=>{void importGraph(e.target.files?.[0]);e.target.value=''}}/></div></header>
-    <div className="subheader"><div className="example-switcher"><label htmlFor="studio-example">示例项目</label><select id="studio-example" value={example} onChange={e=>onExampleChange(e.target.value as Example)}><option value="calculator">四则计算器</option><option value="feedback">反馈工单</option></select></div><span className="sub-caption">需求 · 功能图 · 实现与测试</span></div>
-    {!isCalculator&&<div className="adapter-bar"><label htmlFor="adapter-lang">校验节点的后端语言</label><select id="adapter-lang" value={selectedLanguage} onChange={e=>{setSelectedLanguage(e.target.value);setNodeResult(null);setSource(null);setTrace([])}}>{(adapters.length?adapters:[{id:'javascript',label:'Node.js / JavaScript',available:true,missing:[],source:'',buildOnFirstUse:false}]).map(a=><option key={a.id} value={a.id} disabled={!a.available}>{a.label}{a.available?'':'（缺少 '+a.missing.join(', ')+'）'}</option>)}</select><span className="micro">{adapterError||'只切换「字段校验」的执行语言；其他节点保持不变。编译型语言首次运行会自动编译。'}</span></div>}
+    <div className="subheader"><div className="example-switcher"><label htmlFor="studio-example">示例项目</label><select id="studio-example" value={example} onChange={e=>onExampleChange(e.target.value as Example)}><option value="sum">多数字求和</option><option value="calculator">四则计算器</option><option value="feedback">反馈工单</option></select></div><span className="sub-caption">需求 · 功能图 · 实现与测试</span></div>
+    {isFeedback&&<div className="adapter-bar"><label htmlFor="adapter-lang">校验节点的后端语言</label><select id="adapter-lang" value={selectedLanguage} onChange={e=>{setSelectedLanguage(e.target.value);setNodeResult(null);setSource(null);setTrace([])}}>{(adapters.length?adapters:[{id:'javascript',label:'Node.js / JavaScript',available:true,missing:[],source:'',buildOnFirstUse:false}]).map(a=><option key={a.id} value={a.id} disabled={!a.available}>{a.label}{a.available?'':'（缺少 '+a.missing.join(', ')+'）'}</option>)}</select><span className="micro">{adapterError||'只切换「字段校验」的执行语言；其他节点保持不变。编译型语言首次运行会自动编译。'}</span></div>}
     <div className="workspace">
       <section className="canvas">
         <div className="canvas-header"><strong>功能流程</strong><span>点击节点查看需求、代码与测试；双击父功能折叠 / 展开</span><button onClick={()=>toggle(rootId)}>{collapsed.has(rootId)?'展开全部':'折叠功能'}</button></div>
@@ -429,7 +480,7 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
         <div className="canvas-footer"><span>连线表示业务数据 / 分支，不表示调用栈或线程数量。</span><span>{graph.nodes.length} 节点 · {graph.edges.length} 条边</span></div>
       </section>
       <aside className="right-side">
-        {isCalculator&&<CalculatorPreview onRun={onFullRun}/>}
+        {isSum?<SumPreview onRun={onFullRun}/>:isCalculator?<CalculatorPreview onRun={onFullRun}/>:null}
         <section className="inspector">
           <div className="panel-heading"><div><div className="eyebrow">节点检查器</div><h2>{selected?.title??'选择节点'}</h2></div><div className="degree">入 {degree.in} / 出 {degree.out}</div></div>
           {selected&&<>
@@ -455,14 +506,24 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
             {tab==='code'&&<div className="inspector-body"><p className="micro">功能优先；代码映射仅是可验证证据，不展开全仓调用关系。</p><div className="code-ref">{selected.code||'尚未绑定实现'}</div><div className="code-ref">{selected.test||'尚未绑定测试'}</div>{source?<pre className="source">{source.excerpt}</pre>:<div className="empty">{selected.code?'读取源代码映射…':'新增节点尚未实现；不能假装测试通过。'}</div>}</div>}
           </>}
         </section>
-        {!isCalculator&&<FeedbackPreview onRun={onFullRun} language={selectedLanguage} adapters={adapters}/>}
+        {isFeedback&&<FeedbackPreview onRun={onFullRun} language={selectedLanguage} adapters={adapters}/>}
       </aside>
     </div>
     <footer className="footer"><span>Contract JSON 是意图；实际运行与测试才是证据。</span><span>需求追踪 · React Flow · Sphinx-Needs</span></footer>
   </div>;
 }
 export default function App(){
-  const [example,setExample]=useState<Example>(()=>sessionStorage.getItem(exampleKey)==='feedback'?'feedback':'calculator');
-  const changeExample=(next:Example)=>{sessionStorage.setItem(exampleKey,next);setExample(next)};
+  const [example,setExample]=useState<Example>(()=>{
+    const requested=new URLSearchParams(window.location.search).get('example');
+    if(requested==='sum'||requested==='calculator'||requested==='feedback')return requested;
+    const previous=sessionStorage.getItem(exampleKey);
+    return previous==='sum'||previous==='feedback'?previous:'calculator';
+  });
+  const changeExample=(next:Example)=>{
+    sessionStorage.setItem(exampleKey,next);
+    const url=new URL(window.location.href);
+    if(url.searchParams.has('example')){url.searchParams.set('example',next);window.history.replaceState(null,'',url)}
+    setExample(next);
+  };
   return <ReactFlowProvider key={example}><Studio example={example} onExampleChange={changeExample}/></ReactFlowProvider>;
 }
