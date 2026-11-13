@@ -1,40 +1,58 @@
 ---
 name: contract-studio
-description: Design, trace, implement, or review user-facing features using a functional graph that links confirmed requirements to code and tests. Use for Contract Studio and projects adopting its requirement-to-feature traceability workflow.
+description: Design, implement, or review user-facing features through functional nodes that connect requirements, frontend operations, backend code, and test evidence. Use for Contract Studio or projects adopting this node-driven development workflow.
 ---
 
 # Contract Studio
 
-Keep a feature understandable from the user's requirement through its functional graph, implementation, tests, and observed behaviour. The graph models meaningful user-visible steps, not every function or source file; editing a node does not itself change the application.
+Use the functional graph to carry a feature from the user's intent to an operable interface and verified behaviour. A node represents a meaningful capability or business step and may map to several functions.
 
-## Match the work to the request
+## Establish the assignment
 
-- For analysis or discussion, inspect the existing requirements, graph, code and evidence; explain gaps without changing the project or running tests unless requested.
-- For a new or changed requirement, establish its outcome, inputs, visible effects, exceptions and acceptance criteria with the user. Resolve ordinary details yourself; leave material choices open. Record a requirement as confirmed only after the user actually confirms it. A substantive edit returns it to draft until reconfirmed.
-- For authorized implementation, use confirmed requirements and the affected functional nodes to guide changes; preserve existing entry points and behaviour outside the requested change. Do not assume an unchanged requirement authorizes unrelated work.
-- Run checks suited to the requested work and project instructions. Report what was actually observed, failed or remains unverified; a mock, source annotation or diagram alone is not a passing test.
+- For analysis or discussion, inspect requirements, graph, code and evidence without implementing changes or running tests unless requested.
+- For requirement changes, resolve the outcome, inputs, visible behaviour, exceptions and acceptance criteria. Ask about material choices; choose ordinary details yourself. Record confirmation only when the user gives it, and retain exactly what was confirmed.
+- For authorized implementation, follow the affected nodes through backend, frontend and tests. Preserve existing entry points, requirements, drafts and behaviour outside the change.
+- In the bundled workbench, use the user's current Codex session to implement the saved node task. Graph edits change the specification; business code controls execution. An in-app model dispatcher or a graph execution engine requires a separate design decision.
 
-## One traceable chain
+For work on the bundled project, read the [project guide](../../../README.md) for its actual commands and data sources. When changing node semantics, consult the [accepted design](../../../docs/design/skill-workbench.md) and [glossary](../../../GLOSSARY.md). For other projects, retain their authoritative sources, frontend and build tools rather than copying the demo's structure.
 
-1. **Requirement.** Keep one authoritative, versioned requirement record with a stable ID, user-facing behaviour, acceptance criteria and confirmation status. Reuse an existing Sphinx-Needs source where the project already has one. If a project uses a different authoritative format, make any Sphinx-Needs export a clearly derived view, and regenerate it when the source changes.
-2. **Feature graph.** Link meaningful React Flow feature nodes to requirement IDs. `parentId` expresses containment; edges express business or data dependencies. Record branch conditions and join behaviour where they matter. Keep the graph's structure authoritative in one place rather than maintaining a second graph by hand.
-3. **Implementation and tests.** Associate each requirement with real source and test locations. Where Sphinx-CodeLinks is adopted, use its `@need-ids:` annotations and its supported language formats; avoid claiming that an annotation proves the implementation is correct. Resolve references against actual files, report missing or stale links and distinguish code from test evidence. If code is generated or cannot be annotated, record a verifiable location using the project's existing convention.
-4. **Evidence.** Connect actual test results and runtime traces to their feature nodes when available. Clearly distinguish confirmed requirements, implementation links, test links, mock output, execution failures and unverified behaviour. Follow changes upstream and downstream, including tests and related nodes.
+When adopting this workflow in another repository and its source mapping or index setup is missing, read [External project quick start](references/external-project.md). Map existing sources first; use the minimal setup only for missing pieces.
 
-## Make the structure usable
+When asked to evaluate this skill, use the [skill evaluation protocol](../../../docs/skill-evaluation.md). Assess whether an independent agent can apply it to a fresh task; keep example-project test results separate from evidence of reusable skill behaviour.
 
-Start with the user-facing path from input through the main capability to its result. Group a complex capability under a parent node and let the user expand it to see meaningful stages; keep containment separate from the edges that carry data or branch outcomes. Use names and input/output descriptions that explain the business action rather than exposing every function call. Preserve an existing graph’s semantics and saved edits when adding a presentation.
+## Develop a complete feature
 
-Selecting a node should make its requirement and its actual implementation and test references easy to find. Display draft or confirmed status separately from test evidence; a discovered source marker is a link, not a test result. If a reference is absent, show that gap instead of inventing coverage. Where a runnable example is requested, connect its controls, displayed result, steps and graph highlights to the same real execution. Show errors and partial steps from that execution, and keep fixed fixtures visibly distinct from live results.
+1. **Define and save the node contract.** Give the node a stable identity, responsibility, parent, input/output constraints and examples, processing rules, exceptions and acceptance criteria. Keep requirement text in its authoritative source; reference it from nodes. Support several requirements per node and several nodes per requirement without duplicating the text. Save the selected contract before editing business implementation.
+2. **Save the implementation context.** Include the selected node and its dependencies, linked requirements, confirmed scope, existing functions and callers, frontend entry, test references and acceptance conditions. Mark missing or stale references. Derive the readable node document and Codex handoff from these sources and save them before step 3; exported documents are snapshots. This ordering adds no approval rounds for already authorized work.
+3. **Implement by responsibility.** Separate input handling, business validation, pure computation, orchestration and presentation where their responsibilities differ. Reuse shared helpers while preserving each caller's contract: a new feature's constraints must not silently relax or tighten existing ones. Show helper functions in implementation details rather than turning each into a feature node.
+4. **Connect the frontend.** Every user-facing capability needs an actual operation, input handling, success result and failure feedback. Use the real backend result for values, steps and graph highlights. Track missing frontend entry, missing implementation and missing evidence separately. Register only trusted runtime entry points; a draft node stays pending until connected.
+5. **Refresh traceability and verify.** Regenerate derived documents and build the supported index. Resolve code and test references to actual files. Exercise affected success and failure paths and the actual frontend. If the project has a workbench or the task includes building one, also check the affected graph expansion, node creation, side-panel editing, save/reopen and source navigation. Compare the result with the original acceptance criteria before reporting completion.
 
-Inspect the rendered view and exercise the main interaction, expanding and collapsing a group, following a requirement to source and tests, and running a representative success and failure when those capabilities are in scope. Keep any existing noninteractive or read-only use usable.
+## Keep the graph and side panel useful
 
-## Sphinx-Needs, CodeLinks and ubCode
+Apply the workbench interaction guidance only to projects with a workbench or tasks that request one. Other projects can use functional node data and derived documents alongside their existing interface.
 
-Sphinx-Needs defines and relates needs; Sphinx-CodeLinks can extract traceability markers from code; ubCode provides a Rust-based indexer, editor tooling, CLI and MCP for compatible projects. Choose the tools already installed and licensed for the project. Inspect their actual output before claiming they ran; a local marker scan or an exported RST file is not a Sphinx or ubCode build. Preserve multiple code and test references, and surface unsupported languages or tools rather than silently treating them as covered.
+Start with input → main capability → result. Expand complex capabilities into meaningful stages. Parent relationships express containment; edges express business or data dependencies, including branch conditions where needed. Preserve saved layout and old entry points when consolidating views.
 
-For the bundled example, read the project README for the authoritative requirement store, generated Sphinx-Needs material, current traceability endpoints, and supported run commands. Keep it usable without requiring a third-party commercial license. When integrating another project, adapt to that project's requirements, frontend and build tools instead of assuming the demo's commands or files exist.
+Let the user add children in the graph and edit the selected node in a side panel. Group identity, behaviour contract, implementation/frontend links and evidence. Separate browser drafts from project saves. Show a missing execution binding as pending rather than offering an action that will fail. Keep descriptions readable and provide progressively disclosed structured input/output fields when useful.
 
-## Runtime boundary
+Use motion to communicate selection, expansion and execution, with reduced-motion support. Inspect the actual render and interactions; a build or screenshot alone does not establish the whole user path.
 
-Only invoke known, trusted backend capabilities. The demo's adapter registry selects fixed commands and enforces execution limits; never take executable shell commands from graph JSON or browser input. Dry-run is side-effect-free only when the called operations actually are; use isolated, authorized test data for writes. A feature graph is a planning and evidence view, not an unrestricted workflow executor.
+## Use the real requirement index
+
+Sphinx-Needs parses structured engineering objects and their relationships. CodeLinks extracts source references such as `@need-ids:`. ubCode provides compatible indexing, diagnostics and CLI/MCP tooling. Codex does the natural-language interpretation and implementation.
+
+Keep one editable authority. In the bundled project, JSON owns requirements, confirmation records and graph data; generated RST feeds the real Sphinx-Needs/CodeLinks build. Existing RST-based projects keep their source. Consumers read a normalized index, and source previews and editor navigation resolve the same references. Preserve multiple locations and configured source-project aliases.
+
+Show source-document synchronization separately from index build state. If source saving succeeds but indexing fails, retain the saved work and report the failed or stale index. Identify explicitly supported compatibility scanners by their actual origin. An exported RST file or local marker scan does not count as a Sphinx or ubCode run.
+
+The bundled workflow must work with Sphinx-Needs and CodeLinks without ubCode. Report ubCode as connected only after its tool and applicable project license are available and its output is consumed. Keep unindexed languages and missing references visible without silently dropping existing access.
+
+## Keep evidence and authority distinct
+
+- Requirement confirmation records approved content. Preserve the scope of old confirmations; newly added acceptance conditions require their own confirmation.
+- Source and test links establish traceability. Actual test reports establish their observed pass/fail results; a single node trial and a mock are different evidence.
+- Store execution records separately from graph specifications. Mark evidence stale when relevant code or behaviour changes; display-only movement does not change a requirement's approval.
+- Run only known project capabilities and fixed, trusted test commands. Never execute commands from graph JSON or browser input. A `dry-run` label guarantees no writes only when the called implementation does; use authorized isolated data for write paths.
+
+Deliver the usable feature or requested assessment, the decisive evidence, and any remaining failed or unverified acceptance condition with its next action.

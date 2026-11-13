@@ -9,25 +9,31 @@ import feedbackSeed from '../contracts/feedback.json';
 import calculatorSeed from '../contracts/calculator.json';
 import sumSeed from '../contracts/sum.json';
 import expressionSeed from '../contracts/expression.json';
+import suiteSeed from '../contracts/calculator-suite.json';
+import { prepareCalculatorRequest, normalizeCalculatorResult, type CalculatorMode } from './calculator-input.mjs';
+import { NodeProperties } from './NodeProperties';
+import { CapabilityPanel, type Capability } from './CapabilityPanel';
+import { describeNodeContext } from './node-context.mjs';
 
 type Kind = 'group' | 'ui' | 'logic' | 'async' | 'action';
 type Spec = {
   id:string; parentId:string|null; title:string; kind:Kind; description:string;
   position:{x:number;y:number}; size?:{width:number;height:number};
-  input:string;output:string;errors:string[];fixture:Record<string,unknown>;code:string;test:string;
+  input:string;output:string;errors:string[];fixture:Record<string,unknown>;code:string;test:string;processing?:string;acceptance?:string;inputSchema?:Record<string,unknown>;outputSchema?:Record<string,unknown>;capabilityId?:string;
 };
 type Link = {id:string;source:string;target:string;sourceHandle?:string;targetHandle?:string;label:string};
 type Graph={version:number;feature:{id:string;title:string;goal:string};nodes:Spec[];edges:Link[]};
-type Step={nodeId:string;input:unknown;output:unknown;elapsedMs:number;status:'ok'|'rejected'|'mock';adapter?:string};
+type Step={nodeId:string;input:unknown;output:unknown;elapsedMs:number;status:'ok'|'rejected'|'mock';adapter?:string;derived?:boolean};
 type BackendAdapter={id:string;label:string;available:boolean;missing:string[];source:string;buildOnFirstUse:boolean};
 type Run={runId?:string;mode?:string;trace?:Step[];result?:Record<string,unknown>;ui?:{tone:string;message:string};items?:Feedback[];nodeId?:string;output?:unknown;simulated?:boolean;elapsedMs?:number;error?:string};
 type Feedback={id:string;title:string;category:string;detail:string};
-type TraceRef={path:string;line:number};
-type Requirement={id:string;nodeId:string;title:string;description:string;status:'draft'|'confirmed';revision:number;code:TraceRef[];tests:TraceRef[]};
-type RequirementDraft={title:string;description:string};
-type Traceability={featureId:string;source:string;projectGraph:Graph;requirements:Requirement[];sphinx:{path:string;state:'current'|'outdated'|'missing'}};
-type DisplayNode=FlowNode<{spec:Spec;collapsed:boolean;hasChildren:boolean;run?:Step['status'];requirement?:Requirement;hasUnsavedRequirement:boolean;traceAvailable:boolean;toggle:(id:string)=>void;language:string},'contract'>;
-type Example='expression'|'sum'|'calculator'|'feedback';
+type TraceRef={path:string;line:number;source?:'sphinx-codelinks'|'local-marker'};
+type Acceptance={id:string;input:string;expected:string;observable?:string};
+type Requirement={id:string;nodeId:string;nodeIds?:string[];title:string;description:string;status:'draft'|'confirmed';revision:number;code:TraceRef[];tests:TraceRef[];acceptance?:Acceptance[];acceptanceStatus?:'draft'|'confirmed'};
+type RequirementDraft={title:string;description:string;acceptance?:Acceptance[]};
+type Traceability={featureId:string;source:string;projectGraph:Graph;requirements:Requirement[];sphinx:{path:string;state:'current'|'outdated'|'missing'};index?:{state:'current'|'stale'|'failed'|'missing'|'unconfigured';source:string;path:string;builtAt?:string;error?:string;sourceRevision?:unknown};ubcode?:{state:string;message:string}};
+type DisplayNode=FlowNode<{spec:Spec;collapsed:boolean;hasChildren:boolean;run?:Step['status'];derived?:boolean;requirement?:Requirement;hasUnsavedRequirement:boolean;traceAvailable:boolean;toggle:(id:string)=>void;addChild:(id:string)=>void;language:string},'contract'>;
+type Example='suite'|'expression'|'sum'|'calculator'|'feedback';
 const exampleKey='contract-studio-active-example-v1';
 const clone=<T,>(v:T):T=>JSON.parse(JSON.stringify(v)) as T;
 const toGraph=(text:string):Graph=>{
@@ -56,22 +62,24 @@ async function api<T>(path:string,body?:unknown):Promise<T>{
 }
 
 function NodeCard({data}:NodeProps<DisplayNode>){
-  const {spec,hasChildren,collapsed,run,requirement,hasUnsavedRequirement,traceAvailable,toggle,language}=data;
+  const {spec,hasChildren,collapsed,run,derived,requirement,hasUnsavedRequirement,traceAvailable,toggle,addChild,language}=data;
+  const runLabel=run==='mock'?'○ Mock':derived?run==='ok'?'✓ 运行汇总':'! 失败汇总':run==='ok'?'✓ 已执行':run==='rejected'?'! 已拒绝':'';
   const requirementLabel=requirement?(hasUnsavedRequirement?'需求未保存':requirement.status==='confirmed'?'需求已确认':'需求待确认'):(traceAvailable?'需求未关联':'');
-  const isComputationGroup=spec.id==='expr-compute';
+  const isComputationGroup=spec.id==='expr-compute'||spec.id==='suite-compute';
   if(spec.kind==='group' && hasChildren && !collapsed){
     return <div className={`group-heading ${isComputationGroup?'nested-compute-heading':''}`}>
       {isComputationGroup&&<Handle id="in" type="target" position={Position.Left} className="flow-handle"/>}
-      <span><span className="group-name">{spec.title}</span>{requirementLabel&&<span className={`group-requirement ${!hasUnsavedRequirement&&requirement?.status==='confirmed'?'confirmed':''}`}>{requirementLabel}</span>}{isComputationGroup&&run&&<span className={`group-run ${run}`}>{run==='ok'?'✓ 已执行':run==='rejected'?'! 已拒绝':'○ Mock'}</span>}</span>
-      <button className="node-toggle nodrag" aria-expanded="true" onClick={(e)=>{e.stopPropagation();toggle(spec.id)}}>{isComputationGroup?'折叠计算步骤 −':'折叠 −'}</button>
+      <span><span className="group-name">{spec.title}</span>{requirementLabel&&<span className={`group-requirement ${!hasUnsavedRequirement&&requirement?.status==='confirmed'?'confirmed':''}`}>{requirementLabel}</span>}{isComputationGroup&&run&&<span className={`group-run ${run}`}>{runLabel}</span>}</span>
+      <span className="node-actions"><button className="node-add nodrag" aria-label={`在${spec.title}中添加节点`} onClick={e=>{e.stopPropagation();addChild(spec.id)}}>＋ 添加</button><button className="node-toggle nodrag" aria-expanded="true" onClick={(e)=>{e.stopPropagation();toggle(spec.id)}}>{isComputationGroup?'折叠计算步骤 −':'折叠 −'}</button></span>
       {isComputationGroup&&<><Handle id="ok" type="source" position={Position.Right} style={{top:'36%'}} className="flow-handle"/><Handle id="fail" type="source" position={Position.Right} style={{top:'76%',background:'#c27d56'}} className="flow-handle"/></>}
     </div>;
   }
   return <div className={`node-card node-${spec.kind} ${run==='rejected'?'node-failed':''} ${run==='ok'?'node-passed':''}`}>
     <Handle id="in" type="target" position={Position.Left} className="flow-handle"/>
-    <div className="node-kicker"><span>{labelFor(spec.kind)}</span><span>{run==='ok'?'✓ 通过':run==='rejected'?'! 拒绝':run==='mock'?'○ Mock':''}</span></div>
+    <div className="node-kicker"><span>{labelFor(spec.kind)}</span><span>{runLabel}</span></div>
     <div className="node-name">{spec.title}</div>{requirementLabel&&<div className={`node-requirement ${!hasUnsavedRequirement&&requirement?.status==='confirmed'?'confirmed':''}`}>{requirementLabel}</div>}{spec.id==='validate'&&<div className="node-runtime">Adapter: {language}</div>}
     {hasChildren&&<button className="node-toggle nodrag" aria-expanded="false" onClick={(e)=>{e.stopPropagation();toggle(spec.id)}}>{isComputationGroup?'展开计算步骤 +':'展开子节点 +'}</button>}
+    {spec.kind==='group'&&<button className="node-add nodrag" aria-label={`在${spec.title}中添加节点`} onClick={e=>{e.stopPropagation();addChild(spec.id)}}>＋ 添加</button>}
     <Handle id="ok" type="source" position={Position.Right} style={{top:'36%'}} className="flow-handle"/>
     <Handle id="fail" type="source" position={Position.Right} style={{top:'76%',background:'#c27d56'}} className="flow-handle"/>
   </div>;
@@ -88,7 +96,7 @@ const edgeTypes={branch:BranchEdge};
 
 function Fit({value}:{value:number}){
   const flow=useReactFlow();
-  useEffect(()=>{const t=setTimeout(()=>void flow.fitView({padding:.06,duration:180}),50);return()=>clearTimeout(t)},[flow,value]);
+  useEffect(()=>{const t=setTimeout(()=>void flow.fitView({padding:.06,duration:window.matchMedia('(prefers-reduced-motion: reduce)').matches?0:180}),50);return()=>clearTimeout(t)},[flow,value]);
   return null;
 }
 
@@ -142,7 +150,7 @@ function TraceReference({reference,editor,onEditorChange}:{reference:TraceRef;ed
   };
   return <div className={`trace-reference ${expanded?'is-expanded':''}`}>
     <button type="button" className="trace-ref" aria-expanded={expanded} onClick={()=>void show()}>
-      <span>{reference.path}</span><b>第 {reference.line} 行 <span className="trace-chevron" aria-hidden="true">⌄</span></b>
+      <span>{reference.path}{reference.source==='local-marker'&&<small className="reference-origin">本地标记</small>}</span><b>第 {reference.line} 行 <span className="trace-chevron" aria-hidden="true">⌄</span></b>
     </button>
     <div className="trace-expand" aria-hidden={!expanded}><div className="trace-expand-inner"><div className="trace-preview-panel">
       <div className="trace-preview-toolbar">
@@ -160,7 +168,7 @@ function TraceReference({reference,editor,onEditorChange}:{reference:TraceRef;ed
 function RequirementPanel({node,compatible,requirement,draft,traceability,loading,error,onRefresh,onSave,onCreate,onDraftChange,onDiscard}:{
   node:Spec;compatible:boolean;requirement?:Requirement;traceability:Traceability|null;loading:boolean;error:string;
   draft?:RequirementDraft;onDraftChange:(id:string,draft:RequirementDraft)=>void;onDiscard:(id:string)=>void;
-  onRefresh:()=>void;onSave:(requirement:Requirement,title:string,description:string,action:'save'|'confirm')=>Promise<void>;
+  onRefresh:()=>void;onSave:(requirement:Requirement,title:string,description:string,action:'save'|'confirm',acceptance?:Acceptance[],confirmAcceptance?:boolean)=>Promise<void>;
   onCreate:(nodeId:string,id:string,title:string,description:string)=>Promise<void>;
 }){
   const [busy,setBusy]=useState(false);
@@ -174,23 +182,30 @@ function RequirementPanel({node,compatible,requirement,draft,traceability,loadin
   if(!requirement)return <CreateRequirement key={node.id} node={node} onCreate={onCreate}/>;
   const title=draft?.title??requirement.title;
   const description=draft?.description??requirement.description;
+  const acceptance=draft?.acceptance??requirement.acceptance??[];
   const changed=title!==requirement.title||description!==requirement.description;
-  const save=async(action:'save'|'confirm')=>{
+  const acceptanceChanged=!sameValue(acceptance,requirement.acceptance??[]);
+  const addAcceptance=()=>{let number=1;while(acceptance.some(item=>item.id===`${requirement.id}_AC_${number}`))number++;editAcceptance([...acceptance,{id:`${requirement.id}_AC_${number}`,input:'',expected:''}])};
+  const editAcceptance=(next:Acceptance[])=>onDraftChange(requirement.id,{title,description,acceptance:next});
+  const save=async(action:'save'|'confirm',confirmAcceptance=false)=>{
     setBusy(true);setFormError('');
-    try{await onSave(requirement,title,description,action)}catch(e){setFormError(String(e))}finally{setBusy(false)}
+    try{await onSave(requirement,title,description,action,acceptance,confirmAcceptance)}catch(e){setFormError(String(e))}finally{setBusy(false)}
   };
   const links=(label:string,refs:TraceRef[])=><div className="trace-links"><div className="trace-links-heading">{label} <span>{refs.length}</span></div>{refs.length?refs.map((ref,i)=><TraceReference key={`${ref.path}:${ref.line}:${i}`} reference={ref} editor={editor} onEditorChange={changeEditor}/>):<div className="trace-missing">尚未发现关联标记</div>}</div>;
   return <div className="requirements-body">
     <div className="requirement-meta"><span className="requirement-id">{requirement.id}</span><span className={`requirement-status ${!changed&&requirement.status==='confirmed'?'confirmed':'draft'}`}>{changed?'有未保存修改':requirement.status==='confirmed'?'已确认':'草稿 · 待确认'}</span></div>
-    <div className="trace-section-title">关联证据 <span>由源码标记定位</span></div>
+    <div className="trace-section-title">关联证据 <span>{traceability.index?.source==='sphinx-needs+codelinks'?'Sphinx-Needs / CodeLinks':'本地标记索引'}</span></div>
     {links('实现代码',requirement.code)}{links('相关测试',requirement.tests)}
     <p className="micro">列出的是发现的源码标记，不表示测试已经运行或验证通过。</p>
-    <div className="field"><label htmlFor="requirement-title">需求标题</label><input id="requirement-title" value={title} onChange={e=>onDraftChange(requirement.id,{title:e.target.value,description})}/></div>
-    <div className="field"><label htmlFor="requirement-description">需求描述</label><textarea id="requirement-description" rows={4} value={description} onChange={e=>onDraftChange(requirement.id,{title,description:e.target.value})}/></div>
-    <div className="requirement-actions"><button onClick={()=>void save('save')} disabled={busy||!changed||!title.trim()||!description.trim()}>保存草稿</button><button className="primary-button" onClick={()=>void save('confirm')} disabled={busy||(!changed&&requirement.status==='confirmed')||!title.trim()||!description.trim()}>{busy?'保存中…':'确认这条需求'}</button>{changed&&<button className="link-button" onClick={()=>onDiscard(requirement.id)} disabled={busy}>放弃修改</button>}</div>
+    <div className="field"><label htmlFor="requirement-title">需求标题</label><input id="requirement-title" value={title} onChange={e=>onDraftChange(requirement.id,{title:e.target.value,description,acceptance})}/></div>
+    <div className="field"><label htmlFor="requirement-description">需求描述</label><textarea id="requirement-description" rows={4} value={description} onChange={e=>onDraftChange(requirement.id,{title,description:e.target.value,acceptance})}/></div>
+    <div className="acceptance-heading"><strong>验收条件</strong><span className={`requirement-status ${!acceptanceChanged&&requirement.acceptanceStatus==='confirmed'?'confirmed':'draft'}`}>{!acceptanceChanged&&requirement.acceptanceStatus==='confirmed'?'已确认':'待确认'}</span></div>
+    {acceptance.map((item,index)=><fieldset className="acceptance-item" key={index}><legend>条件 {index+1}</legend>{(['id','input','expected','observable'] as const).map(field=><div className="field" key={field}><label>{({id:'条件 ID',input:'输入',expected:'预期结果',observable:'可观察行为'} as const)[field]}<input aria-label={`条件${index+1}${field}`} value={item[field]??''} onChange={event=>editAcceptance(acceptance.map((entry,i)=>i===index?{...entry,[field]:event.target.value}:entry))}/></label></div>)}<button className="link-button danger-link" onClick={()=>editAcceptance(acceptance.filter((_,i)=>i!==index))}>移除此条件</button></fieldset>)}
+    <div className="requirement-actions"><button className="link-button" onClick={addAcceptance}>＋ 添加验收条件</button><button onClick={()=>void save('save',true)} disabled={busy||!acceptance.length||acceptance.some(item=>!item.id.trim()||!item.input.trim()||!item.expected.trim())||(!acceptanceChanged&&requirement.acceptanceStatus==='confirmed')}>确认验收条件</button></div>
+    <div className="requirement-actions"><button onClick={()=>void save('save')} disabled={busy||(!changed&&!acceptanceChanged)||!title.trim()||!description.trim()}>保存草稿</button><button className="primary-button" onClick={()=>void save('confirm')} disabled={busy||(!changed&&requirement.status==='confirmed')||!title.trim()||!description.trim()}>{busy?'保存中…':'确认这条需求'}</button>{(changed||acceptanceChanged)&&<button className="link-button" onClick={()=>onDiscard(requirement.id)} disabled={busy}>放弃修改</button>}</div>
     <p className="micro">确认记录当前文字；修改后需重新确认。画布修改先保存在浏览器，需手动保存到项目；业务代码不会自动改写。</p>
     {formError&&<div className="notice notice-error" role="alert">{formError} <button className="link-button" onClick={onRefresh}>重新读取</button></div>}
-    <div className="trace-source">需求文件：{traceability.source} · Sphinx 文档：{traceability.sphinx.state==='current'?'已同步':traceability.sphinx.state==='outdated'?'待同步':'缺失'}</div>
+    <div className="trace-source">需求文件：{traceability.source} · RST 源文件：{traceability.sphinx.state==='current'?'已同步':traceability.sphinx.state==='outdated'?'待同步':'缺失'}</div>
   </div>;
 }
 
@@ -307,7 +322,7 @@ function SumPreview({onRun}:{onRun:(run:Run)=>void}){
 }
 
 type ExpressionStep={index:number;operator:string;operands:number[];result:number};
-type ExpressionRun=Run&{result:{status:'success'|'invalid';value?:number;message:string;steps?:ExpressionStep[]}};
+type ExpressionRun=Run&{result:{status:'success'|'invalid';value?:number;count?:number;total?:number;message:string;steps?:ExpressionStep[]}};
 type ExpressionEngine={expression:string;busy:boolean;result:ExpressionRun|null;error:string;steps:ExpressionStep[];calculate:(value:string)=>Promise<void>;changeExpression:(value:string)=>void};
 const initialExpression='12 + 3 × (8 - 4) ÷ 2';
 function describeExpressionStep(step:ExpressionStep){
@@ -316,7 +331,7 @@ function describeExpressionStep(step:ExpressionStep){
   return step.operands.length===1?`${symbol}${step.operands[0]}`:step.operands.join(` ${symbol} `);
 }
 
-function useExpressionEngine(enabled:boolean,onRun:(run:Run)=>void):ExpressionEngine{
+function useExpressionEngine(enabled:boolean,onRun:(run:Run)=>void,mode:CalculatorMode='expression'):ExpressionEngine{
   const [expression,setExpression]=useState(initialExpression);
   const expressionRef=useRef(expression);expressionRef.current=expression;
   const [busy,setBusy]=useState(true);
@@ -328,7 +343,8 @@ function useExpressionEngine(enabled:boolean,onRun:(run:Run)=>void):ExpressionEn
     const current=++requestId.current;
     setBusy(true);setError('');setResult(null);
     try{
-      const run=await api<ExpressionRun>('/api/expression',{expression:value});
+      const {path,body}=prepareCalculatorRequest(mode,value);
+      const run=normalizeCalculatorResult(mode,await api<unknown>(path,body)) as ExpressionRun;
       if(current!==requestId.current)return;
       setResult(run);onRunRef.current(run);
     }catch(e){
@@ -336,7 +352,7 @@ function useExpressionEngine(enabled:boolean,onRun:(run:Run)=>void):ExpressionEn
       setError(String(e));onRunRef.current({trace:[]});
     }finally{if(current===requestId.current)setBusy(false)}
   };
-  useEffect(()=>{if(!enabled)return;void calculate(expressionRef.current);return()=>{requestId.current++}},[enabled]);
+  useEffect(()=>{if(!enabled)return;void calculate(expressionRef.current);return()=>{requestId.current++}},[enabled,mode]);
   const changeExpression=(value:string)=>{
     requestId.current++;setExpression(value);setBusy(false);setResult(null);setError('');onRunRef.current({trace:[]});
   };
@@ -365,8 +381,8 @@ function ExpressionPreview({engine}:{engine:ExpressionEngine}){
   </section>;
 }
 
-// @need-ids: REQ_EXPR_INPUT, REQ_EXPR_RESULT
-function ExpressionCalculator({engine,onShowProcess}:{engine:ExpressionEngine;onShowProcess:()=>void}){
+// @need-ids: REQ_EXPR_INPUT, REQ_EXPR_RESULT, REQ_AVERAGE_ALL
+function ExpressionCalculator({engine,onShowProcess,title='混合运算计算器',inputMode='expression'}:{engine:ExpressionEngine;onShowProcess:()=>void;title?:string;inputMode?:CalculatorMode}){
   const {expression,busy,result,error,calculate,changeExpression}=engine;
   const inputRef=useRef<HTMLInputElement>(null);
   const replace=(next:string,caret:number)=>{
@@ -401,16 +417,16 @@ function ExpressionCalculator({engine,onShowProcess}:{engine:ExpressionEngine;on
   const keys=[
     {label:'C',action:clear,kind:'utility',aria:'清除'},
     {label:'⌫',action:erase,kind:'utility',aria:'退格'},
-    {label:'(',action:()=>insert('('),kind:'utility',aria:'左括号'},
-    {label:')',action:()=>insert(')'),kind:'utility',aria:'右括号'},
+    {label:inputMode==='average'?',':'(',action:()=>insert(inputMode==='average'?',':'('),kind:'utility',aria:inputMode==='average'?'分隔数字':'左括号'},
+    {label:inputMode==='average'?'±':')',action:()=>insert(inputMode==='average'?'-':')'),kind:'utility',aria:inputMode==='average'?'负号':'右括号'},
     ...['7','8','9','÷','4','5','6','×','1','2','3','−','0','.','+'].map(label=>({label,action:()=>insert(label),kind:['÷','×','−','+'].includes(label)?'operator':'digit',aria:({'+':'加','−':'减','×':'乘','÷':'除','.':'小数点'} as Record<string,string>)[label]??label})),
   ];
   return <section className="expression-calculator" aria-labelledby="expression-calculator-title">
-    <div className="expression-calculator-heading"><div><div className="eyebrow">亲手试一试</div><h2 id="expression-calculator-title">混合运算计算器</h2></div><span>支持键盘输入</span></div>
+    <div className="expression-calculator-heading"><div><div className="eyebrow">亲手试一试</div><h2 id="expression-calculator-title">{title}</h2></div><span>支持键盘输入</span></div>
     <form onSubmit={event=>{event.preventDefault();runCalculation()}}>
       <div className="expression-calculator-display">
-        <label htmlFor="expression-calculator-input">算式</label>
-        <input ref={inputRef} id="expression-calculator-input" aria-label="计算器算式" value={expression} onChange={event=>changeExpression(event.target.value)} onKeyDown={event=>{if(event.key==='='){event.preventDefault();runCalculation()}else if(event.key==='Escape'){event.preventDefault();clear()}}} placeholder="输入算式" spellCheck={false}/>
+        <label htmlFor="expression-calculator-input">{inputMode==='average'?'数字列表':'算式'}</label>
+        <input ref={inputRef} id="expression-calculator-input" aria-label="计算器算式" value={expression} onChange={event=>changeExpression(event.target.value)} onKeyDown={event=>{if(event.key==='='){event.preventDefault();runCalculation()}else if(event.key==='Escape'){event.preventDefault();clear()}}} placeholder={inputMode==='average'?'例如 1, 2, 3':'输入算式'} spellCheck={false}/>
         <div className={`expression-calculator-output ${error||result?.ui?.tone==='error'?'is-error':''}`} role="status">
           {error?error:result?.ui?.tone==='error'?result.ui.message:typeof result?.result.value==='number'?String(result.result.value):'等待计算'}
         </div>
@@ -420,23 +436,24 @@ function ExpressionCalculator({engine,onShowProcess}:{engine:ExpressionEngine;on
         <button type="submit" className="expression-calculator-key equals" aria-label="计算结果" disabled={busy}>=</button>
       </div>
     </form>
-    <p className="expression-calculator-hint">按运算优先级计算；Enter 或 = 计算，Esc 清空。小数可能有浮点舍入误差。</p>
+    <p className="expression-calculator-hint">{inputMode==='average'?'数字用逗号或加号分隔。':'按所选模式计算。'}Enter 或 = 计算，Esc 清空。小数可能有浮点舍入误差。</p>
   </section>;
 }
 
 function Studio({example,onExampleChange}:{example:Example;onExampleChange:(example:Example)=>void}){
+  const isSuite=example==='suite';
   const isExpression=example==='expression';
   const isCalculator=example==='calculator';
   const isSum=example==='sum';
   const isFeedback=example==='feedback';
-  const original=(isExpression?expressionSeed:isSum?sumSeed:isCalculator?calculatorSeed:feedbackSeed) as Graph;
-  const rootId=isExpression?'expression':isSum?'sum':isCalculator?'calculator':'submit';
-  const defaultSelected=isExpression?'expr-compute':isSum?'sum-accumulate':isCalculator?'calc-compute':'lookup';
-  const JSON_KEY=isExpression?'contract-studio-expression-graph-v1':isSum?'contract-studio-sum-graph-v1':isCalculator?'contract-studio-calculator-graph-v1':'contract-studio-adapters-v03';
-  const GRAPH_BASE_KEY=isExpression?'contract-studio-expression-graph-base-v1':isSum?'contract-studio-sum-graph-base-v1':isCalculator?'contract-studio-calculator-graph-base-v1':'contract-studio-project-graph-base-v1';
-  const GRAPH_PENDING_KEY=isExpression?'contract-studio-expression-graph-pending-v1':isSum?'contract-studio-sum-graph-pending-v1':isCalculator?'contract-studio-calculator-graph-pending-v1':'contract-studio-project-graph-pending-v1';
-  const REQUIREMENT_DRAFT_KEY=isExpression?'contract-studio-expression-requirement-drafts-v1':isSum?'contract-studio-sum-requirement-drafts-v1':isCalculator?'contract-studio-calculator-requirement-drafts-v1':'contract-studio-requirement-drafts-v1';
-  const traceUrl=isExpression?'/api/traceability?feature=expression':isSum?'/api/traceability?feature=sum':isCalculator?'/api/traceability?feature=calculator':'/api/traceability';
+  const original=(isSuite?suiteSeed:isExpression?expressionSeed:isSum?sumSeed:isCalculator?calculatorSeed:feedbackSeed) as Graph;
+  const rootId=isSuite?'suite':isExpression?'expression':isSum?'sum':isCalculator?'calculator':'submit';
+  const defaultSelected=isSuite?'suite':isExpression?'expr-compute':isSum?'sum-accumulate':isCalculator?'calc-compute':'lookup';
+  const JSON_KEY=isSuite?'contract-studio-suite-graph-v1':isExpression?'contract-studio-expression-graph-v1':isSum?'contract-studio-sum-graph-v1':isCalculator?'contract-studio-calculator-graph-v1':'contract-studio-adapters-v03';
+  const GRAPH_BASE_KEY=isSuite?'contract-studio-suite-graph-base-v1':isExpression?'contract-studio-expression-graph-base-v1':isSum?'contract-studio-sum-graph-base-v1':isCalculator?'contract-studio-calculator-graph-base-v1':'contract-studio-project-graph-base-v1';
+  const GRAPH_PENDING_KEY=isSuite?'contract-studio-suite-graph-pending-v1':isExpression?'contract-studio-expression-graph-pending-v1':isSum?'contract-studio-sum-graph-pending-v1':isCalculator?'contract-studio-calculator-graph-pending-v1':'contract-studio-project-graph-pending-v1';
+  const REQUIREMENT_DRAFT_KEY=isSuite?'contract-studio-suite-requirement-drafts-v1':isExpression?'contract-studio-expression-requirement-drafts-v1':isSum?'contract-studio-sum-requirement-drafts-v1':isCalculator?'contract-studio-calculator-requirement-drafts-v1':'contract-studio-requirement-drafts-v1';
+  const traceUrl=isSuite?'/api/traceability?feature=suite':isExpression?'/api/traceability?feature=expression':isSum?'/api/traceability?feature=sum':isCalculator?'/api/traceability?feature=calculator':'/api/traceability';
   const [initial]=useState(()=>{
     let graph=clone(original),hasDraft=false,base:Graph|null=null;
     try{const text=localStorage.getItem(JSON_KEY);if(text){graph=toGraph(text);hasDraft=true}}catch{/* Keep the usable bundled example. */}
@@ -455,11 +472,16 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
   const [selectedLanguage,setSelectedLanguage]=useState('javascript');
   const [adapters,setAdapters]=useState<BackendAdapter[]>([]);
   const [adapterError,setAdapterError]=useState('');
+  const [capabilities,setCapabilities]=useState<Capability[]>([]);
+  const [capabilityError,setCapabilityError]=useState('');
+  useEffect(()=>{let live=true;void api<{capabilities:Capability[]}>('/api/capabilities').then(data=>{if(live)setCapabilities(data.capabilities)}).catch(reason=>{if(live)setCapabilityError(String(reason))});return()=>{live=false}},[]);
   useEffect(()=>{if(!isFeedback)return;let live=true;void api<{adapters:BackendAdapter[]}>('/api/adapters').then(d=>{if(live)setAdapters(d.adapters)}).catch(e=>{if(live)setAdapterError(String(e))});return()=>{live=false}},[isFeedback]);
   const [traceability,setTraceability]=useState<Traceability|null>(null);
   const [requirementDrafts,setRequirementDrafts]=useState<Record<string,RequirementDraft>>(()=>{try{const saved=JSON.parse(localStorage.getItem(REQUIREMENT_DRAFT_KEY)??'{}');return saved&&typeof saved==='object'&&!Array.isArray(saved)?saved:{}}catch{return {}}});
   const [traceLoading,setTraceLoading]=useState(true);
   const [traceError,setTraceError]=useState('');
+  const [indexBusy,setIndexBusy]=useState(false);
+  const [indexError,setIndexError]=useState('');
   const refreshTraceability=useCallback(()=>{
     setTraceLoading(true);setTraceError('');
     void api<Traceability>(traceUrl).then(data=>{
@@ -479,8 +501,8 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
     }).catch(e=>{setTraceError(String(e));graphInitialized.current=true;setGraphReady(true)}).finally(()=>setTraceLoading(false));
   },[initial.hasDraft,traceUrl,GRAPH_PENDING_KEY]);
   useEffect(()=>{refreshTraceability()},[refreshTraceability]);
-  const saveRequirement=async(requirement:Requirement,title:string,description:string,action:'save'|'confirm')=>{
-    const updated=await api<Traceability>('/api/traceability/requirement',{featureId:traceability?.featureId,id:requirement.id,title,description,revision:requirement.revision,action});
+  const saveRequirement=async(requirement:Requirement,title:string,description:string,action:'save'|'confirm',acceptance?:Acceptance[],confirmAcceptance=false)=>{
+    const updated=await api<Traceability>('/api/traceability/requirement',{featureId:traceability?.featureId,id:requirement.id,title,description,revision:requirement.revision,action,acceptance,confirmAcceptance});
     setTraceability(updated);
     setRequirementDrafts(old=>{const next={...old};delete next[requirement.id];return next});
   };
@@ -490,10 +512,18 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
     const updated=await api<Traceability>('/api/traceability/requirement',{featureId:traceability?.featureId,id,nodeId,title,description,action:'create'});
     setTraceability(updated);
   };
-  const initialCollapsed=()=>new Set<string>(isExpression?['expr-compute']:[]);
+  const initialCollapsed=()=>new Set<string>(isSuite?['suite-compute','calculator','sum','expression','expr-compute','average']:isExpression?['expr-compute']:[]);
   const [collapsed,setCollapsed]=useState<Set<string>>(initialCollapsed);
-  const [tab,setTab]=useState<'requirement'|'test'|'code'|'trace'>('requirement');
+  const [tab,setTab]=useState<'property'|'document'|'requirement'|'test'|'code'|'trace'>('property');
   const [expressionPane,setExpressionPane]=useState<'detail'|'process'>('detail');
+  const [suiteMode,setSuiteMode]=useState<CalculatorMode>('expression');
+  const modeInputs=useRef<Partial<Record<CalculatorMode,string>>>({expression:initialExpression});
+  const [activeRequirementId,setActiveRequirementId]=useState('');
+  const [linkRequirementId,setLinkRequirementId]=useState('');
+  const [creatingRequirement,setCreatingRequirement]=useState(false);
+  const [linkBusy,setLinkBusy]=useState(false);
+  const [linkError,setLinkError]=useState('');
+  const [panelOpen,setPanelOpen]=useState(!isSuite);
   const [fixture,setFixture]=useState('');
   const [mode,setMode]=useState<'mock'|'dry-run'|'sandbox'>('dry-run');
   const [nodeResult,setNodeResult]=useState<Run|null>(null);
@@ -505,13 +535,16 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
   const fileRef=useRef<HTMLInputElement>(null);
   const selected=graph.nodes.find(n=>n.id===selectedId);
   const compatible=!!traceability&&graph.feature?.id===traceability.featureId;
-  const selectedRequirement=compatible?traceability?.requirements.find(r=>r.nodeId===selectedId):undefined;
+  const selectedRequirements=compatible?traceability?.requirements.filter(r=>(r.nodeIds??[r.nodeId]).includes(selectedId))??[]:[];
+  const selectedRequirement=selectedRequirements.find(requirement=>requirement.id===activeRequirementId)??selectedRequirements[0];
+  const selectedCapability=selected?.capabilityId?capabilities.find(capability=>capability.id===selected.capabilityId):capabilities.find(capability=>capability.nodeIds.includes(selectedId));
   const degree={in:graph.edges.filter(x=>x.target===selectedId).length,out:graph.edges.filter(x=>x.source===selectedId).length};
   useEffect(()=>{localStorage.setItem(JSON_KEY,JSON.stringify(graph))},[graph]);
   useEffect(()=>{if(graphBase)localStorage.setItem(GRAPH_BASE_KEY,JSON.stringify(graphBase));else localStorage.removeItem(GRAPH_BASE_KEY)},[graphBase]);
   useEffect(()=>{localStorage.setItem(REQUIREMENT_DRAFT_KEY,JSON.stringify(requirementDrafts))},[requirementDrafts]);
   useEffect(()=>{setGraphMessage(null)},[graph]);
-  useEffect(()=>{setFixture(JSON.stringify(selected?.fixture??{},null,2));setNodeResult(null);setError('');setSource(null)},[selectedId]);
+  useEffect(()=>{setFixture(JSON.stringify(selected?.fixture??{},null,2));setNodeResult(null);setError('');setSource(null);setActiveRequirementId('');setCreatingRequirement(false);setLinkRequirementId('');setLinkError('')},[selectedId]);
+  useEffect(()=>{if(!panelOpen)return;const close=(event:KeyboardEvent)=>{if(event.key==='Escape'&&!(event.target instanceof HTMLInputElement)&&!(event.target instanceof HTMLTextAreaElement))setPanelOpen(false)};window.addEventListener('keydown',close);return()=>window.removeEventListener('keydown',close)},[panelOpen]);
   useEffect(()=>{
     if(tab!=='code'||!selected)return;
     let live=true;
@@ -526,9 +559,10 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
   },[selectedId,tab,selectedLanguage,isFeedback,selectedRequirement]);
   const toggle=useCallback((id:string)=>{setCollapsed(old=>{const next=new Set(old);if(next.has(id))next.delete(id);else next.add(id);return next});setFitVersion(n=>n+1)},[]);
   const byId=useMemo(()=>new Map(graph.nodes.map(n=>[n.id,n])),[graph.nodes]);
-  const toggleNode=useCallback((id:string)=>{toggle(id);if(isExpression){setSelectedId(id);setExpressionPane('detail')}},[toggle,isExpression]);
+  const toggleNode=useCallback((id:string)=>{toggle(id);if(isExpression||isSuite){setSelectedId(id);setExpressionPane('detail')}},[toggle,isExpression,isSuite]);
   const hidden=useCallback((n:Spec)=>{let p=n.parentId;const walked=new Set<string>();while(p&&!walked.has(p)){if(collapsed.has(p))return true;walked.add(p);p=byId.get(p)?.parentId??null}return false},[collapsed,byId]);
   const statuses=useMemo(()=>Object.fromEntries(trace.map(t=>[t.nodeId,t.status])),[trace]);
+  const derivedNodes=useMemo(()=>new Set(trace.filter(step=>step.derived).map(step=>step.nodeId)),[trace]);
   const activeEdges=useMemo(()=>{
     const active=new Map<string,'ok'|'rejected'>();
     const isWithin=(nodeId:string,ancestorId:string)=>{
@@ -548,15 +582,53 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
     }
     return active;
   },[graph.edges,trace,byId]);
-  const flowNodes=useMemo<DisplayNode[]>(()=>graph.nodes.map(n=>{
+  const suiteLayout=useMemo(()=>{
+    if(!isSuite)return {offsets:new Map<string,{x:number;y:number}>(),width:0,height:0,computeWidth:0,computeHeight:0};
+    const offsets=new Map<string,{x:number;y:number}>();
+    const children=graph.nodes.filter(n=>n.parentId==='suite-compute').sort((a,b)=>a.position.y-b.position.y);
+    let computeWidth=870,computeHeight=285;
+    if(children.length<=4&&children.every(n=>['calculator','sum','expression','average'].includes(n.id)&&collapsed.has(n.id))){
+      computeWidth=650;
+      for(const n of children){const i=children.indexOf(n);const initial=(suiteSeed as Graph).nodes.find(x=>x.id===n.id)!;const delta={x:initial.position.x-(25+(i%2)*290),y:initial.position.y-(85+Math.floor(i/2)*170)};offsets.set(n.id,delta);computeWidth=Math.max(computeWidth,n.position.x-delta.x+295);computeHeight=Math.max(computeHeight,n.position.y-delta.y+185)}
+    }else{
+      let offset=0;computeWidth=500;computeHeight=250;
+      for(const n of children){offsets.set(n.id,{x:0,y:offset});const has=graph.nodes.some(c=>c.parentId===n.id),folded=has&&collapsed.has(n.id);const h=has&&!folded?(n.size?.height??415):n.kind==='group'?120:116;const w=has&&!folded?(n.size?.width??970):n.kind==='group'?230:176;computeWidth=Math.max(computeWidth,n.position.x+w+65);computeHeight=Math.max(computeHeight,n.position.y-offset+h+65);if(folded)offset+=Math.max(0,(n.size?.height??415)-120)}
+    }
+    const expanded=!collapsed.has('suite-compute');const groupWidth=expanded?computeWidth:230,groupHeight=expanded?computeHeight:120;
+    const targets:Record<string,{x:number;y:number}>={'suite-input':{x:30,y:135},'suite-compute':{x:260,y:85},'suite-result':{x:260+groupWidth+60,y:135}};
+    let width=260+groupWidth+300,height=Math.max(285,groupHeight+160);
+    for(const n of graph.nodes.filter(x=>x.parentId==='suite')){
+      const target=targets[n.id];const initial=(suiteSeed as Graph).nodes.find(x=>x.id===n.id);
+      if(target&&initial){const delta={x:initial.position.x-target.x,y:initial.position.y-target.y};offsets.set(n.id,delta);width=Math.max(width,n.position.x-delta.x+(n.id==='suite-compute'?groupWidth:176)+65);height=Math.max(height,n.position.y-delta.y+(n.id==='suite-compute'?groupHeight:116)+65)}
+      else {width=Math.max(width,n.position.x+(n.size?.width??176)+65);height=Math.max(height,n.position.y+(n.size?.height??116)+65)}
+    }
+    return {offsets,width,height,computeWidth,computeHeight};
+  },[isSuite,graph.nodes,collapsed]);
+  const addChild=useCallback((parentId:string)=>{
+    if(!graphReady)return;
+    const id=`step-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,6)}`;
+    setGraph(g=>{
+      const parent=g.nodes.find(n=>n.id===parentId);
+      if(!parent||parent.kind!=='group')return g;
+      const children=g.nodes.filter(n=>n.parentId===parentId);
+      const y=Math.max(80,...children.map(n=>n.position.y+(n.size?.height??120)+28));
+      const node:Spec={id,parentId,title:'新功能节点',kind:'logic',description:'',position:{x:35,y},input:'待填写',output:'待填写',processing:'',acceptance:'',errors:[],fixture:{},code:'',test:''};
+      const size={width:Math.max(parent.size?.width??0,970),height:Math.max(parent.size?.height??0,y+160)};
+      return {...g,nodes:[...g.nodes.map(n=>n.id===parentId?{...n,size}:n),node]};
+    });
+    setCollapsed(old=>{const next=new Set(old);next.delete(parentId);return next});
+    setSelectedId(id);setPanelOpen(true);setTab('property');setExpressionPane('detail');setFitVersion(n=>n+1);
+  },[graphReady]);
+  const flowNodes=useMemo<DisplayNode[]>(()=>[...graph.nodes].sort((a,b)=>{const depth=(node:Spec)=>{let value=0,p=node.parentId;const seen=new Set<string>();while(p&&!seen.has(p)){seen.add(p);value++;p=byId.get(p)?.parentId??null}return value};return depth(a)-depth(b)}).map(n=>{
     const hasChildren=graph.nodes.some(x=>x.parentId===n.id);
     const folded=hasChildren&&collapsed.has(n.id);
-    return {id:n.id,type:'contract',parentId:n.parentId??undefined,position:n.position,
-      style:{width:hasChildren&&!folded?(n.size?.width??970):n.kind==='group'?230:176,height:hasChildren&&!folded?(n.size?.height??415):n.kind==='group'?120:116},
+    const displacement=suiteLayout.offsets.get(n.id);
+    return {id:n.id,type:'contract',parentId:n.parentId??undefined,position:displacement?{x:n.position.x-displacement.x,y:n.position.y-displacement.y}:n.position,
+      style:{width:isSuite&&n.id==='suite'&&!folded?suiteLayout.width:isSuite&&n.id==='suite-compute'&&!folded?suiteLayout.computeWidth:hasChildren&&!folded?(n.size?.width??970):n.kind==='group'?230:176,height:isSuite&&n.id==='suite'&&!folded?suiteLayout.height:isSuite&&n.id==='suite-compute'&&!folded?suiteLayout.computeHeight:hasChildren&&!folded?(n.size?.height??415):n.kind==='group'?120:116},
       hidden:hidden(n),selected:n.id===selectedId,
-      data:{spec:n,hasChildren,collapsed:folded,run:statuses[n.id],requirement:compatible&&!traceError&&!traceLoading?traceability?.requirements.find(r=>r.nodeId===n.id):undefined,hasUnsavedRequirement:compatible&&!!traceability?.requirements.some(r=>r.nodeId===n.id&&!!requirementDrafts[r.id]&&(requirementDrafts[r.id].title!==r.title||requirementDrafts[r.id].description!==r.description)),traceAvailable:compatible&&!traceError&&!traceLoading,toggle:toggleNode,language:selectedLanguage},
+      data:{spec:n,hasChildren,collapsed:folded,run:statuses[n.id],derived:derivedNodes.has(n.id),requirement:compatible&&!traceError&&!traceLoading?traceability?.requirements.find(r=>(r.nodeIds??[r.nodeId]).includes(n.id)):undefined,hasUnsavedRequirement:compatible&&!!traceability?.requirements.some(r=>(r.nodeIds??[r.nodeId]).includes(n.id)&&!!requirementDrafts[r.id]&&(requirementDrafts[r.id].title!==r.title||requirementDrafts[r.id].description!==r.description||!sameValue(requirementDrafts[r.id].acceptance??r.acceptance??[],r.acceptance??[]))),traceAvailable:compatible&&!traceError&&!traceLoading,toggle:toggleNode,addChild,language:selectedLanguage},
     };
-  }),[graph.nodes,collapsed,hidden,selectedId,statuses,toggleNode,selectedLanguage,traceability,requirementDrafts,compatible,traceError,traceLoading]);
+  }),[graph.nodes,byId,collapsed,hidden,selectedId,statuses,derivedNodes,toggleNode,addChild,selectedLanguage,traceability,requirementDrafts,compatible,traceError,traceLoading,isSuite,suiteLayout]);
   const flowEdges=useMemo<Edge[]>(()=>graph.edges.map(e=>({
     ...e,id:e.id,sourceHandle:e.sourceHandle??'ok',targetHandle:e.targetHandle??'in',type:'branch',
     hidden:hidden(byId.get(e.source)!)||hidden(byId.get(e.target)!),
@@ -564,8 +636,8 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
     markerEnd:{type:MarkerType.ArrowClosed,color:'#94a3b8',width:16,height:16}
   })),[graph.edges,byId,hidden,activeEdges]);
   const onNodesChange=useCallback((changes:NodeChange<DisplayNode>[])=>{
-    setGraph(g=>{let updated=g.nodes;for(const c of changes){if(c.type==='position'&&c.position){updated=updated.map(n=>n.id===c.id?{...n,position:c.position!}:n)}}return updated===g.nodes?g:{...g,nodes:updated}});
-  },[]);
+    setGraph(g=>{let updated=g.nodes;for(const c of changes){if(c.type==='position'&&c.position){updated=updated.map(n=>{if(n.id!==c.id)return n;const delta=suiteLayout.offsets.get(n.id);return {...n,position:delta?{x:c.position!.x+delta.x,y:c.position!.y+delta.y}:c.position!}})}}return updated===g.nodes?g:{...g,nodes:updated}});
+  },[suiteLayout]);
   const onEdgesChange=useCallback((changes:EdgeChange[])=>{
     const deleted=new Set(changes.filter(x=>x.type==='remove').map(x=>x.id));
     if(deleted.size)setGraph(g=>({...g,edges:g.edges.filter(e=>!deleted.has(e.id))}));
@@ -575,16 +647,24 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
     const id=`edge-${Date.now()}`;
     setGraph(g=>({...g,edges:[...g.edges,{id,source:c.source,target:c.target,sourceHandle:c.sourceHandle??'ok',targetHandle:c.targetHandle??'in',label:c.sourceHandle==='fail'?'失败':'下一步'}]}));
   },[]);
-  const update=(patch:Partial<Spec>)=>setGraph(g=>({...g,nodes:g.nodes.map(n=>n.id===selectedId?{...n,...patch}:n)}));
-  const remove=()=>{if(selectedId===rootId)return;setGraph(g=>({...g,nodes:g.nodes.filter(n=>n.id!==selectedId),edges:g.edges.filter(e=>e.source!==selectedId&&e.target!==selectedId)}));setSelectedId(rootId)};
+  const update=(patch:Partial<Spec>)=>{setGraph(g=>({...g,nodes:g.nodes.map(n=>n.id===selectedId?{...n,...patch}:n)}));if(patch.parentId)setCollapsed(old=>{const next=new Set(old);next.delete(patch.parentId!);return next})};
+  const remove=()=>{
+    if(selectedId===rootId)return;
+    const removed=new Set([selectedId]);let changed=true;
+    while(changed){changed=false;for(const node of graph.nodes)if(node.parentId&&removed.has(node.parentId)&&!removed.has(node.id)){removed.add(node.id);changed=true}}
+    if(removed.size>1&&!window.confirm(`删除「${selected?.title}」和它的 ${removed.size-1} 个子节点？此操作先修改浏览器草稿。`))return;
+    setGraph(g=>({...g,nodes:g.nodes.filter(n=>!removed.has(n.id)),edges:g.edges.filter(e=>!removed.has(e.source)&&!removed.has(e.target))}));setSelectedId(rootId);
+  };
   const addNode=()=>{
     const id=`step-${Date.now().toString(36)}`;
     const node:Spec={id,parentId:rootId,title:'待实现功能',kind:'logic',description:'请先描述输入、处理、输出及异常。',position:{x:35,y:260},input:'Any',output:'Any',errors:[],fixture:{},code:'',test:''};
     setGraph(g=>({...g,nodes:[...g.nodes,node]}));setCollapsed(isExpression?old=>{const next=new Set(old);next.delete(rootId);return next}:new Set());setSelectedId(id);setFitVersion(n=>n+1);
   };
   const runSelected=async()=>{
-    if(!selected)return;setError('');setBusy(true);
-    try{const input=JSON.parse(fixture);const result=await api<Run>(isExpression?'/api/expression/test':isSum?'/api/sum/test':isCalculator?'/api/calculator/test':'/api/test',{nodeId:selected.id,input,mode,language:selectedLanguage});setNodeResult(result);
+    if(!selected||!selectedCapability)return;setError('');setBusy(true);
+    try{const input=JSON.parse(fixture);
+      const nodeId=selectedCapability.nodeIds.includes(selected.id)?selected.id:selectedCapability.rootNodeId;
+      const result=await api<Run>(selectedCapability.testPath,{nodeId,input,mode,language:selectedLanguage});setNodeResult(result);
       if(result.trace)setTrace(result.trace);else setTrace([{nodeId:selected.id,input,output:result.output,status:result.simulated?'mock':(result.output as {status?:string})?.status==='invalid'||(result.output as {status?:string})?.status==='duplicate'?'rejected':'ok',elapsedMs:result.elapsedMs??0}]);
     }catch(e){setError(String(e))}finally{setBusy(false)};
   };
@@ -633,55 +713,114 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
   };
   const exportGraph=()=>{const blob=new Blob([JSON.stringify(graph,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`contract.${example}.json`;a.click();URL.revokeObjectURL(url)};
   const importGraph=async(file?:File)=>{if(!file)return;try{const g=toGraph(await file.text());setGraph(g);setSelectedId(g.nodes[0]?.id??'');setTrace([]);setCollapsed(initialCollapsed());setFitVersion(n=>n+1);setGraphMessage(null)}catch(e){setGraphMessage({tone:'error',text:`无法导入画布：${String(e)}`})}};
-  const selectNode=(id:string)=>{setSelectedId(id);setError('');if(isExpression)setExpressionPane('detail')};
+  const selectNode=(id:string)=>{setSelectedId(id);setError('');setPanelOpen(true);setTab('property');setExpressionPane('detail')};
   const selectedPath:Spec[]=[];
   {let current=selected;const seen=new Set<string>();while(current&&!seen.has(current.id)){seen.add(current.id);selectedPath.unshift(current);current=current.parentId?byId.get(current.parentId):undefined}}
-  const onFullRun=(run:Run)=>{setTrace(run.trace??[]);setNodeResult(run);setError('')};
-  const expressionEngine=useExpressionEngine(isExpression,onFullRun);
+  const onFullRun=(run:Run)=>{
+    const actual=run.trace??[];
+    if(isSuite&&actual.length&&run.result){
+      const rejected=run.result.status!=='success';
+      const marker=(nodeId:string,status:'ok'|'rejected'):Step=>({nodeId,input:null,output:null,elapsedMs:0,status,derived:true});
+      setTrace([marker('suite-input','ok'),...actual,marker('suite-compute',rejected?'rejected':'ok'),marker('suite-result','ok')]);
+    }else setTrace(actual);
+    setNodeResult(run);setError('');
+  };
+  const expressionEngine=useExpressionEngine(isExpression||isSuite,onFullRun,isSuite?suiteMode:'expression');
+  const changeCalculationMode=(next:CalculatorMode,exampleValue?:string)=>{
+    if(next===suiteMode){if(exampleValue!==undefined){expressionEngine.changeExpression(exampleValue);void expressionEngine.calculate(exampleValue)}return}
+    modeInputs.current[suiteMode]=expressionEngine.expression;
+    const defaults:Record<CalculatorMode,string>={expression:initialExpression,sum:'1+2+3',calculator:'1+2',average:'1, 2, 3'};
+    expressionEngine.changeExpression(exampleValue??modeInputs.current[next]??defaults[next]);setSuiteMode(next);setTrace([]);setNodeResult(null);
+  };
+  const buildIndex=async()=>{setIndexBusy(true);setIndexError('');try{setTraceability(await api<Traceability>('/api/traceability/build',{featureId:traceability?.featureId??graph.feature.id}))}catch(reason){setIndexError(String(reason))}finally{setIndexBusy(false)}};
+  const linkRequirement=async()=>{
+    const requirement=traceability?.requirements.find(item=>item.id===linkRequirementId);if(!requirement)return;
+    setLinkBusy(true);setLinkError('');
+    try{const nodeIds=[...new Set([...(requirement.nodeIds??[requirement.nodeId]),selectedId])];setTraceability(await api<Traceability>('/api/traceability/requirement',{featureId:traceability!.featureId,id:requirement.id,title:requirement.title,description:requirement.description,revision:requirement.revision,action:'save',nodeIds}));setActiveRequirementId(requirement.id);setCreatingRequirement(false);setLinkRequirementId('')}catch(reason){setLinkError(String(reason))}finally{setLinkBusy(false)}
+  };
+  const openCapability=(capability:Capability)=>{
+    if(capability.id==='feedback.submit'){if(!isFeedback)onExampleChange('feedback');else document.querySelector('.preview-panel')?.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});setPanelOpen(false);return}
+    if(!isSuite){onExampleChange('suite');return}
+    const next=capability.frontend?.mode as CalculatorMode;
+    if(['average','expression','sum','calculator'].includes(next)){
+      changeCalculationMode(next);
+      setPanelOpen(false);document.querySelector('.suite-calculator')?.scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});
+    }
+  };
+  const nodeDocument=selected?[
+    `# ${selected.title}`,`节点：${selected.id} · 所属：${selectedPath.map(n=>n.title).join(' / ')}`,`来源：${graphDirty?'浏览器草稿，尚未保存到项目':'项目功能图'}`,
+    `## 功能描述\n${selected.description||'待填写'}`,`## 输入\n${selected.input||'待填写'}${selected.inputSchema?'\n```json\n'+JSON.stringify(selected.inputSchema,null,2)+'\n```':''}`,
+    `## 处理\n${selected.processing||'待填写'}`,`## 输出\n${selected.output||'待填写'}${selected.outputSchema?'\n```json\n'+JSON.stringify(selected.outputSchema,null,2)+'\n```':''}`,
+    `## 异常\n${selected.errors.join('\n')||'待填写'}`,`## 节点验收说明\n${selected.acceptance||'待填写'}`,
+    describeNodeContext(graph,selected.id),
+    `## 关联需求\n${selectedRequirements.map(requirement=>`### ${requirement.id} · ${requirement.title}\n状态：${requirement.status==='confirmed'?'正文已确认':'正文待确认'}；验收：${requirement.acceptanceStatus==='confirmed'?'已确认':'待确认'}\n${requirement.description}\n${(requirement.acceptance??[]).map(item=>`- ${item.id}：输入 ${item.input}；预期 ${item.expected}${item.observable?'；观察 '+item.observable:''}`).join('\n')}`).join('\n\n')||'待关联'}`,
+    `## 实现函数\n${selectedCapability?.implementation.map(ref=>`- ${ref.path}#${ref.symbol}`).join('\n')||'待实现'}`,
+    `## 前端入口\n${selectedCapability?.frontend?`${selectedCapability.frontend.component} · ${selectedCapability.frontend.path} · 模式 ${selectedCapability.frontend.mode??'默认'}`:'前端待接入'}`,
+    `## 源码定位\n${selectedRequirements.flatMap(requirement=>requirement.code.map(ref=>`- ${ref.path}:${ref.line} (${ref.source??'索引'})`)).join('\n')||'待关联'}`,
+    `## 相关测试\n${selectedRequirements.flatMap(requirement=>requirement.tests.map(ref=>`- ${ref.path}:${ref.line}`)).join('\n')||selectedCapability?.testFiles.join('\n')||'待关联'}`
+  ].join('\n\n'):'';
+  const nodeTask=[`# Codex 开发任务：${selected?.title??''}`,'请围绕下列节点契约完成实现、前端接入和验收。保留其他功能的既有入口与行为；未确认需求先指出待确认项。',nodeDocument,`## 本次需要补齐\n- 后端：${selectedCapability?'核对实际实现与当前契约':'待实现并登记可信能力'}\n- 前端：${selectedCapability?.frontend?'核对输入、结果、错误及过程展示':'补齐真实功能操作入口'}\n- 验收：运行关联测试并记录结果，在工作台核对成功与失败路径。`,`## 追踪上下文\n项目：${graph.feature.id}\n需求源：${traceability?.source??'未读取'}\n索引：${traceability?.index?.source??'未读取'} / ${traceability?.index?.state??'未读取'}\n实际测试证据：${selectedCapability?`/api/capabilities/evidence?capabilityId=${selectedCapability.id}`:'能力尚未登记'}`].join('\n\n');
+  const exportNodeDocument=(task=false)=>{const blob=new Blob([task?nodeTask:nodeDocument],{type:'text/markdown;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`${selected?.id??'node'}${task?'.codex-task':''}.md`;a.click();URL.revokeObjectURL(url)};
   const graphStatus=!graphReady?'正在读取项目图…':traceError?'无法读取项目图，浏览器草稿仍可编辑':!graphCompatible?'画布功能与项目图不匹配':graphConflict?'项目图已变更，本地草稿未覆盖':!graphBase?'浏览器草稿缺少项目基线':graphDirty?'浏览器草稿 · 未保存到项目':'已与项目图同步';
   return <div className="studio-shell">
-    <header className="topbar"><div className="brand"><div className="brand-symbol">◇</div><div><strong>Contract Studio</strong><span>让功能可见，让实现可验</span></div></div><div className="top-actions"><button onClick={addNode} disabled={!graphReady}>＋ 添加节点</button><button onClick={()=>void saveGraph()} disabled={!graphReady||graphBusy||!!traceError||!graphCompatible||!graphBase||graphConflict||!graphDirty} className="save-project">{graphBusy?'处理中…':'保存到项目'}</button><button onClick={exportGraph}>导出 JSON</button><button onClick={()=>fileRef.current?.click()} disabled={!graphReady}>导入</button><button onClick={()=>{setGraph(clone(original));setSelectedId(defaultSelected);setCollapsed(initialCollapsed());setTrace([]);setFitVersion(n=>n+1)}} disabled={!graphReady}>重置画布</button><input hidden type="file" ref={fileRef} accept=".json,application/json" onChange={e=>{void importGraph(e.target.files?.[0]);e.target.value=''}}/></div></header>
-    <div className="subheader"><div className="example-switcher"><label htmlFor="studio-example">示例项目</label><select id="studio-example" value={example} onChange={e=>onExampleChange(e.target.value as Example)}><option value="expression">混合四则运算</option><option value="sum">多数字求和</option><option value="calculator">四则计算器</option><option value="feedback">反馈工单</option></select></div><span className="sub-caption">需求 · 功能图 · 实现与测试</span></div>
+    <header className="topbar"><div className="brand"><div className="brand-symbol">◇</div><div><strong>Contract Studio</strong><span>让功能可见，让实现可验</span></div></div><div className="top-actions">{!isSuite&&<button onClick={addNode} disabled={!graphReady}>＋ 添加节点</button>}<button onClick={()=>void saveGraph()} disabled={!graphReady||graphBusy||!!traceError||!graphCompatible||!graphBase||graphConflict||!graphDirty} className="save-project">{graphBusy?'处理中…':'保存到项目'}</button><button onClick={exportGraph}>导出 JSON</button><button onClick={()=>fileRef.current?.click()} disabled={!graphReady}>导入</button><button onClick={()=>{setGraph(clone(original));setSelectedId(defaultSelected);setCollapsed(initialCollapsed());setTrace([]);setFitVersion(n=>n+1)}} disabled={!graphReady}>重置画布</button><input hidden type="file" ref={fileRef} accept=".json,application/json" onChange={e=>{void importGraph(e.target.files?.[0]);e.target.value=''}}/></div></header>
+    <div className="subheader"><div className="example-switcher"><label htmlFor="studio-example">示例项目</label><select id="studio-example" value={example} onChange={e=>onExampleChange(e.target.value as Example)}><option value="suite">计算器</option><option value="feedback">反馈工单</option>{isExpression&&<option value="expression">混合四则运算（旧版）</option>}{isSum&&<option value="sum">多数字求和（旧版）</option>}{isCalculator&&<option value="calculator">四则计算器（旧版）</option>}</select></div><span className="sub-caption">需求 · 功能图 · 实现与测试</span></div>
     {isFeedback&&<div className="adapter-bar"><label htmlFor="adapter-lang">校验节点的后端语言</label><select id="adapter-lang" value={selectedLanguage} onChange={e=>{setSelectedLanguage(e.target.value);setNodeResult(null);setSource(null);setTrace([])}}>{(adapters.length?adapters:[{id:'javascript',label:'Node.js / JavaScript',available:true,missing:[],source:'',buildOnFirstUse:false}]).map(a=><option key={a.id} value={a.id} disabled={!a.available}>{a.label}{a.available?'':'（缺少 '+a.missing.join(', ')+'）'}</option>)}</select><span className="micro">{adapterError||'只切换「字段校验」的执行语言；其他节点保持不变。编译型语言首次运行会自动编译。'}</span></div>}
     <div className="workspace">
-      <section className={`canvas ${isExpression?'with-expression-calculator':''}`}>
-        <div className="canvas-header"><strong>功能流程</strong><span>{isExpression?'点击节点查看需求；使用左下角按钮缩放':'点击节点查看需求、代码与测试；双击父功能折叠 / 展开'}</span><button onClick={()=>toggle(rootId)}>{collapsed.has(rootId)?'展开全部':'折叠功能'}</button></div>
+      <section className={`canvas ${isExpression||isSuite?'with-expression-calculator':''}`}>
+        <div className="canvas-header"><strong>功能流程</strong><span>{isSuite?'点击节点编辑；在功能组内添加子节点':'点击节点查看需求、代码与测试；双击父功能折叠 / 展开'}</span><button onClick={()=>toggle(rootId)}>{collapsed.has(rootId)?'展开全部':'折叠功能'}</button></div>
         <div className={`graph-sync ${graphConflict||!graphBase?'attention':''}`} role="status"><span>{graphStatus}</span><div><button onClick={refreshTraceability} disabled={!graphReady||graphBusy||traceLoading}>刷新状态</button><button onClick={()=>void loadProjectGraph()} disabled={!graphReady||graphBusy}>读取项目图</button>{graphCompatible&&(graphConflict||!graphBase)&&<button onClick={()=>void rebaseGraph()} disabled={graphBusy}>保留草稿并更新基线</button>}</div></div>
+        <div className={`index-status ${traceability?.index?.state??'missing'}`} role="status"><span><b>需求索引</b> · {indexBusy?'正在构建…':traceability?.index?({current:'已构建 · 当前',stale:'源已变化 · 待重建',failed:'构建失败',missing:'尚未构建',unconfigured:'未配置构建工具'} as const)[traceability.index.state]:'正在读取'}{traceability?.index?.source==='local-marker'?' · 本地标记兼容视图':' · Sphinx-Needs / CodeLinks'}</span><button className="link-button" disabled={indexBusy||traceLoading||!traceability} onClick={()=>void buildIndex()}>重建索引</button></div>
+        {traceability?.ubcode&&<div className="index-tool-note">ubCode：{traceability.ubcode.message}</div>}
+        {(indexError||traceability?.index?.error)&&<div className="graph-message error" role="alert">{indexError||traceability?.index?.error}</div>}
+        {capabilityError&&<div className="graph-message error" role="alert">运行能力暂不可用：{capabilityError}</div>}
         {graphMessage&&<div className={`graph-message ${graphMessage.tone}`} role={graphMessage.tone==='error'?'alert':'status'}>{graphMessage.text}</div>}
-        <ReactFlow nodes={flowNodes} edges={flowEdges} nodesDraggable={graphReady} nodesConnectable={graphReady} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} onNodeClick={(_,n)=>selectNode(n.id)} onNodeDoubleClick={(_,n)=>{if(graph.nodes.some(x=>x.parentId===n.id))toggleNode(n.id)}} onPaneClick={()=>{}} fitView fitViewOptions={{padding:.06}} minZoom={.35} maxZoom={1.5} zoomOnScroll={!isExpression} preventScrolling={!isExpression} deleteKeyCode={null} defaultEdgeOptions={{type:'branch'}}>
+        <ReactFlow nodes={flowNodes} edges={flowEdges} nodesDraggable={graphReady} nodesConnectable={graphReady} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} onNodeClick={(_,n)=>selectNode(n.id)} onNodeDoubleClick={(_,n)=>{if(graph.nodes.some(x=>x.parentId===n.id))toggleNode(n.id)}} onPaneClick={(event)=>{if(isSuite&&event.detail===2&&graphReady)addChild(rootId)}} fitView fitViewOptions={{padding:.06}} minZoom={.2} maxZoom={1.5} zoomOnScroll={!(isExpression||isSuite)} preventScrolling={!(isExpression||isSuite)} deleteKeyCode={null} defaultEdgeOptions={{type:'branch'}}>
           <Background gap={22} size={1} color="#e6ebf0"/><Controls position="bottom-left" showInteractive={false}/>
           <Fit value={fitVersion}/>
         </ReactFlow>
-        <div className="canvas-footer"><span>{isExpression?'计算器在下方 · 连线表示业务数据 / 分支。':'连线表示业务数据 / 分支，不表示调用栈或线程数量。'}</span><span>{graph.nodes.length} 节点 · {graph.edges.length} 条边</span></div>
+        <div className="canvas-footer"><span>{isSuite?'在功能组里添加节点，也可双击空白处添加。':isExpression?'计算器在下方 · 连线表示业务数据 / 分支。':'连线表示业务数据 / 分支，不表示调用栈或线程数量。'}</span><span>{graph.nodes.length} 节点 · {graph.edges.length} 条边</span></div>
         {isExpression&&<ExpressionCalculator engine={expressionEngine} onShowProcess={()=>setExpressionPane('process')}/>}
+        {isSuite&&<div className="suite-calculator"><div className="suite-calculator-heading"><div><div className="eyebrow">真实执行 · 查看过程</div><h2>计算器</h2></div><div className="suite-modes" role="group" aria-label="计算方式">{(['expression','sum','calculator','average'] as const).map(m=><button key={m} aria-pressed={suiteMode===m} onClick={()=>changeCalculationMode(m)}>{m==='expression'?'混合运算':m==='sum'?'多数字求和':m==='average'?'平均值':'两数运算'}</button>)}</div></div>
+          <div className="suite-examples"><span>示例</span>{([{label:'1 + 2',mode:'calculator',value:'1+2'},{label:'1 + 2 + 3',mode:'sum',value:'1+2+3'},{label:'1 加到 20',mode:'sum',value:Array.from({length:20},(_,i)=>i+1).join('+')},{label:'20 个数求平均',mode:'average',value:Array.from({length:20},(_,i)=>i+1).join(', ')},{label:'括号与优先级',mode:'expression',value:'12+3×(8-4)÷2'}] as const).map(x=><button key={x.label} onClick={()=>changeCalculationMode(x.mode,x.value)}>{x.label}</button>)}</div>
+          <p className="suite-mode-hint">{suiteMode==='sum'?'至少三个数字，用 + 连接；逐项累加。':suiteMode==='calculator'?'输入两个数字和一个运算符。':suiteMode==='average'?'一个或多个数字，用逗号或 + 分隔；展示数量、总和与平均值。':'支持括号及加减乘除，按优先级计算。'}</p>
+          <ExpressionCalculator engine={expressionEngine} title={suiteMode==='average'?'平均值':'算式'} inputMode={suiteMode} onShowProcess={()=>setExpressionPane('process')}/>
+          {suiteMode==='average'&&expressionEngine.result?.result.status==='success'&&<dl className="average-summary"><div><dt>数字数量</dt><dd>{expressionEngine.result.result.count}</dd></div><div><dt>总和</dt><dd>{expressionEngine.result.result.total}</dd></div><div><dt>平均值</dt><dd>{expressionEngine.result.result.value}</dd></div></dl>}
+          {expressionEngine.steps.length>0&&<div className="suite-process"><div className="expression-process-heading"><strong>{suiteMode==='sum'?'逐项累加':'计算过程'}</strong><span>共 {expressionEngine.steps.length} 步 · 实际执行顺序</span></div><ol className="expression-steps">{expressionEngine.steps.map(step=><li key={step.index}><span className="expression-step-index">{String(step.index).padStart(2,'0')}</span><span className="expression-step-equation">{describeExpressionStep(step)}</span><strong>= {step.result}</strong></li>)}</ol></div>}
+        </div>}
       </section>
-      <aside className={`right-side ${isExpression?'expression-side':''}`}>
+      <aside className={`right-side ${isExpression?'expression-side':''} ${isSuite?'node-drawer':''} ${isSuite&&panelOpen?'is-open':''}`} aria-label="节点详情">
         {isExpression&&<div className="expression-side-switch" role="group" aria-label="右侧内容"><button type="button" aria-pressed={expressionPane==='detail'} onClick={()=>setExpressionPane('detail')}>节点详情</button><button type="button" aria-pressed={expressionPane==='process'} onClick={()=>setExpressionPane('process')}>计算过程</button></div>}
         {isExpression?<div hidden={expressionPane!=='process'}><ExpressionPreview engine={expressionEngine}/></div>:isSum?<SumPreview onRun={onFullRun}/>:isCalculator?<CalculatorPreview onRun={onFullRun}/>:null}
-        <section className="inspector" hidden={isExpression&&expressionPane!=='detail'}>
-          <div className="panel-heading"><div><div className="eyebrow">节点检查器</div><h2>{selected?.title??'选择节点'}</h2></div><div className="degree">入 {degree.in} / 出 {degree.out}</div></div>
+        <section className="inspector" hidden={(isExpression&&expressionPane!=='detail')||(isSuite&&!panelOpen)}>
+          <div className="panel-heading"><div><div className="eyebrow">节点检查器</div><h2>{selected?.title??'选择节点'}</h2></div><div className="degree">入 {degree.in} / 出 {degree.out}</div>{isSuite&&<button type="button" className="drawer-close" aria-label="关闭节点详情" onClick={()=>setPanelOpen(false)}>×</button>}</div>
           {selected&&<>
             {selectedPath.length>1&&<nav className="node-path" aria-label="功能层级">{selectedPath.map((part,index)=><span key={part.id}>{index>0&&<span className="path-separator" aria-hidden="true">›</span>}{index===selectedPath.length-1?<strong aria-current="location">{part.title}</strong>:<button type="button" onClick={()=>selectNode(part.id)}>{part.title}</button>}</span>)}</nav>}
             <p className="description">{selected.description}</p>
             <div className="info-pair"><span>输入</span><b>{selected.input}</b></div><div className="info-pair"><span>输出</span><b>{selected.output}</b></div>
-            <div className="tabs">{(['requirement','test','trace','code'] as const).map(t=><button key={t} className={tab===t?'active':''} onClick={()=>setTab(t)}>{t==='requirement'?'需求关联':t==='test'?'测试':t==='trace'?'日志':'代码映射'}</button>)}</div>
-            {tab==='requirement'&&<RequirementPanel key={`${selected.id}:${selectedRequirement?.id??'new'}:${selectedRequirement?.revision??0}`} node={selected} compatible={compatible} requirement={selectedRequirement} draft={selectedRequirement?requirementDrafts[selectedRequirement.id]:undefined} traceability={traceability} loading={traceLoading} error={traceError} onRefresh={refreshTraceability} onSave={saveRequirement} onCreate={createRequirement} onDraftChange={changeDraft} onDiscard={discardDraft}/>}
+            <div className="tabs">{(['property','document','requirement','test','trace','code'] as const).map(t=><button key={t} className={tab===t?'active':''} onClick={()=>setTab(t)}>{t==='property'?'节点属性':t==='document'?'文档与任务':t==='requirement'?'需求关联':t==='test'?'运行与测试':t==='trace'?'日志':'实现映射'}</button>)}</div>
+            {tab==='property'&&<NodeProperties key={selected.id} node={selected} nodes={graph.nodes} capabilities={capabilities} onPatch={update} onSave={()=>void saveGraph()} saving={graphBusy} canSave={graphDirty&&!graphConflict&&graphCompatible&&!!graphBase&&!!selected.title.trim()} onRemove={selected.id===rootId?undefined:remove}/>}
+            {tab==='document'&&<div className="inspector-body"><p className="micro">{graphDirty?'文档包含尚未保存的浏览器草稿。':'文档由当前节点及关联需求生成。'}</p><div className="document-actions"><button className="primary-button" onClick={()=>exportNodeDocument()}>导出节点说明</button><button className="primary-button secondary" onClick={()=>exportNodeDocument(true)}>导出 Codex 开发任务</button></div><pre className="node-document">{nodeDocument}</pre></div>}
+            {tab==='requirement'&&<>
+              {compatible&&!traceLoading&&!traceError&&<div className="requirement-picker">
+                {selectedRequirements.length>0&&<div className="field"><label htmlFor="node-requirement">关联需求 · {selectedRequirements.length} 条</label><select id="node-requirement" value={creatingRequirement?'':selectedRequirement?.id??''} onChange={event=>{setActiveRequirementId(event.target.value);setCreatingRequirement(false)}}>{creatingRequirement&&<option value="">正在创建新需求</option>}{selectedRequirements.map(requirement=><option key={requirement.id} value={requirement.id}>{requirement.id} · {requirement.title}</option>)}</select></div>}
+                <details><summary>关联已有需求或新增需求</summary><div className="requirement-link-row"><select aria-label="选择已有需求" value={linkRequirementId} onChange={event=>setLinkRequirementId(event.target.value)}><option value="">选择已有需求</option>{traceability?.requirements.filter(requirement=>!(requirement.nodeIds??[requirement.nodeId]).includes(selectedId)).map(requirement=><option key={requirement.id} value={requirement.id}>{requirement.id} · {requirement.title}</option>)}</select><button className="link-button" disabled={!linkRequirementId||linkBusy||!projectGraph?.nodes.some(node=>node.id===selectedId)} onClick={()=>void linkRequirement()}>关联</button></div><button className="link-button" onClick={()=>setCreatingRequirement(true)}>＋ 创建新需求</button>{!projectGraph?.nodes.some(node=>node.id===selectedId)&&<p className="micro">先将新节点保存到项目，再关联需求。</p>}</details>
+                {linkError&&<div className="notice notice-error" role="alert">{linkError}</div>}
+              </div>}
+              <RequirementPanel key={`${selected.id}:${creatingRequirement?'new':selectedRequirement?.id??'new'}:${selectedRequirement?.revision??0}`} node={selected} compatible={compatible} requirement={creatingRequirement?undefined:selectedRequirement} draft={!creatingRequirement&&selectedRequirement?requirementDrafts[selectedRequirement.id]:undefined} traceability={traceability} loading={traceLoading} error={traceError} onRefresh={refreshTraceability} onSave={saveRequirement} onCreate={async(...args)=>{await createRequirement(...args);setActiveRequirementId(args[1]);setCreatingRequirement(false)}} onDraftChange={changeDraft} onDiscard={discardDraft}/>
+            </>}
             {tab==='test'&&<div className="inspector-body">
-              <details className="contract-editor"><summary>编辑节点契约</summary>
-                <div className="field"><label>功能名称</label><input value={selected.title} onChange={e=>update({title:e.target.value})}/></div>
-                <div className="field"><label>处理行为</label><textarea rows={2} value={selected.description} onChange={e=>update({description:e.target.value})}/></div>
-                <div className="field"><label>输入</label><input value={selected.input} onChange={e=>update({input:e.target.value})}/></div>
-                <div className="field"><label>输出</label><input value={selected.output} onChange={e=>update({output:e.target.value})}/></div>
-              </details>
-              <div className="field"><label>模拟输入 JSON</label><textarea className="json-area" rows={5} spellCheck={false} value={fixture} onChange={e=>setFixture(e.target.value)}/></div>
+              <CapabilityPanel key={selectedCapability?.id??selected.id} capability={selectedCapability} onOpen={openCapability}/>
+              <div className="property-section-title">节点试运行</div>
+              <div className="field"><label>试运行输入 JSON</label><textarea className="json-area" rows={5} spellCheck={false} value={fixture} onChange={e=>setFixture(e.target.value)}/></div>
               <button className="link-button" onClick={()=>{try{const fixtureObj=JSON.parse(fixture);if(!fixtureObj||typeof fixtureObj!=='object'||Array.isArray(fixtureObj))throw Error('Fixture 必须是对象');update({fixture:fixtureObj});setError('')}catch(e){setError(String(e))}}}>将输入保存为节点 Fixture</button>
               <div className="mode-line"><label><input type="radio" checked={mode==='mock'} onChange={()=>setMode('mock')}/> Mock</label><label><input type="radio" checked={mode==='dry-run'} onChange={()=>setMode('dry-run')}/> Dry-run</label><label><input type="radio" checked={mode==='sandbox'} onChange={()=>setMode('sandbox')}/> Sandbox</label></div>
-              <div className="row-actions"><button className="primary-button" onClick={()=>void runSelected()} disabled={busy}>{busy?'测试中…':'测试此节点'}</button>{selected.id!==rootId&&<button onClick={remove}>删除节点</button>}</div>
+              <div className="row-actions"><button className="primary-button" onClick={()=>void runSelected()} disabled={busy||!selectedCapability}>{busy?'运行中…':selectedCapability?'试运行节点':'待实现 · 暂不可运行'}</button></div>
               {error&&<div className="notice notice-error">{error}</div>}
               {nodeResult&&<div className="result"><span className="result-head">运行结果 {nodeResult.simulated?'（仅 Mock）':''}{selected.id==='validate'?` · ${selectedLanguage}`:''}</span><pre>{JSON.stringify(nodeResult.output??nodeResult.result??nodeResult,null,2)}</pre></div>}
             </div>}
-            {tab==='trace'&&<div className="inspector-body"><div className="micro">执行记录区分真实运行与 Mock；Mock 只展示模拟结果。</div>{trace.length?trace.map((s,i)=><div className={`trace-step ${s.nodeId===selectedId?'highlight':''}`} key={i}><div className="trace-line"><b>{s.nodeId}</b><span>{s.status} · {s.elapsedMs}ms {s.adapter?`· ${s.adapter}`:''}</span></div><details><summary>查看输入输出</summary><pre>{JSON.stringify({input:s.input,output:s.output},null,2)}</pre></details></div>):<div className="empty">提交右侧表单或测试单个节点后查看。</div>}</div>}
-            {tab==='code'&&<div className="inspector-body"><p className="micro">功能优先；代码映射仅是可验证证据，不展开全仓调用关系。</p><div className="code-ref">{selected.code||'尚未绑定实现'}</div><div className="code-ref">{selected.test||'尚未绑定测试'}</div>{source?<pre className="source">{source.excerpt}</pre>:<div className="empty">{selected.code?'读取源代码映射…':'新增节点尚未实现；不能假装测试通过。'}</div>}</div>}
+            {tab==='trace'&&<div className="inspector-body"><div className="micro">执行记录区分真实运行、汇总与 Mock；Mock 只展示模拟结果。</div>{trace.length?trace.map((s,i)=><div className={`trace-step ${s.nodeId===selectedId?'highlight':''}`} key={i}><div className="trace-line"><b>{s.nodeId}</b><span>{s.status} · {s.derived?'根据实际运行汇总':`${s.elapsedMs}ms`} {s.adapter?`· ${s.adapter}`:''}</span></div>{!s.derived&&<details><summary>查看输入输出</summary><pre>{JSON.stringify({input:s.input,output:s.output},null,2)}</pre></details>}</div>):<div className="empty">提交表单或测试单个节点后查看。</div>}</div>}
+            {tab==='code'&&<div className="inspector-body"><div className="property-section-title">实际能力与函数</div>{selectedCapability?<><div className="code-ref">{selectedCapability.id} · {selectedCapability.runPath}</div>{selectedCapability.implementation.map(reference=><div className="code-ref" key={`${reference.path}:${reference.symbol}`}><strong>{reference.symbol}</strong><br/>{reference.path}</div>)}<div className="code-ref">前端：{selectedCapability.frontend?`${selectedCapability.frontend.component} / ${selectedCapability.frontend.mode??'默认'}`:'待接入'}</div></>:<div className="capability-pending">此节点尚未绑定实际能力。</div>}<div className="property-section-title">节点定位</div><div className="code-ref">{selected.code||'尚未绑定实现位置'}</div><div className="code-ref">{selected.test||'尚未绑定测试位置'}</div>{source?<pre className="source">{source.excerpt}</pre>:<div className="empty">在需求关联中查看当前索引的代码与测试位置。</div>}</div>}
           </>}
         </section>
         {isFeedback&&<FeedbackPreview onRun={onFullRun} language={selectedLanguage} adapters={adapters}/>}
@@ -693,9 +832,9 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
 export default function App(){
   const [example,setExample]=useState<Example>(()=>{
     const requested=new URLSearchParams(window.location.search).get('example');
-    if(requested==='expression'||requested==='sum'||requested==='calculator'||requested==='feedback')return requested;
+    if(requested==='suite'||requested==='expression'||requested==='sum'||requested==='calculator'||requested==='feedback')return requested;
     const previous=sessionStorage.getItem(exampleKey);
-    return previous==='expression'||previous==='sum'||previous==='feedback'?previous:'calculator';
+    return previous==='feedback'?'feedback':'suite';
   });
   const changeExample=(next:Example)=>{
     sessionStorage.setItem(exampleKey,next);

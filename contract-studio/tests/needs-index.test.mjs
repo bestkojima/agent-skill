@@ -1,0 +1,137 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import { fileURLToPath } from 'node:url';
+import { readNeedsIndex, buildNeedsIndex, normalizeCodeUrl } from '../server/needs-index.mjs';
+import { traceability, exportNeeds, updateRequirement, sourceAt, buildTraceabilityIndex } from '../server/traceability.mjs';
+
+const project=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+const python=path.join(project,process.platform==='win32'?'.venv/Scripts/python.exe':'.venv/bin/python');
+async function fixture(t,{configured=false}={}) {
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'studio-index-'));
+  t.after(()=>fs.rm(root,{recursive:true,force:true}));
+  for(const dir of ['contracts','src','server','tests','traceability','server/adapters/impl/java','server/adapters/impl/php','server/adapters/impl/cpp'])await fs.mkdir(path.join(root,dir),{recursive:true});
+  await fs.writeFile(path.join(root,'contracts/requirements.json'),JSON.stringify({version:1,featureId:'demo',requirements:[{id:'REQ_ONE',nodeId:'one',title:'原需求',description:'原描述',status:'draft',revision:1}]}));
+  await fs.writeFile(path.join(root,'contracts/feedback.json'),JSON.stringify({version:2,feature:{id:'demo',title:'示例',goal:'验证'},nodes:[{id:'one',title:'功能一',input:'In',output:'Out',parentId:null,position:{x:0,y:0}},{id:'two',title:'功能二',input:'In',output:'Out',parentId:'one',position:{x:10,y:0}}],edges:[{id:'e',source:'one',target:'two',sourceHandle:'ok',label:'有效'}]}));
+  await fs.writeFile(path.join(root,'src/demo.ts'),'// @need-ids: REQ_ONE\nexport const value=1;\n');
+  await fs.writeFile(path.join(root,'tests/demo.mjs'),'// @need-ids: REQ_ONE\n');
+  await fs.writeFile(path.join(root,'server/adapters/impl/java/Demo.java'),'// @need-ids: REQ_ONE\n');
+  await fs.writeFile(path.join(root,'server/adapters/impl/php/demo.php'),'// @need-ids: REQ_ONE\n');
+  await fs.writeFile(path.join(root,'server/adapters/impl/cpp/demo.cpp'),'// @need-ids: REQ_ONE\nint demo(){return 1;}\n');
+  if(configured){
+    await fs.copyFile(path.join(project,'traceability/conf.py'),path.join(root,'traceability/conf.py'));
+    // A local-URL fixture has no repository; Git URL discovery is irrelevant here.
+    await fs.appendFile(path.join(root,'traceability/conf.py'),"\nsuppress_warnings = ['codelinks.git_root']\n");
+    const config=await fs.readFile(path.join(project,'traceability/ubproject.toml'),'utf8');
+    // Keep configured project names but make missing language directories explicit.
+    await fs.writeFile(path.join(root,'traceability/ubproject.toml'),config);
+    for(const name of ['python','go','rust','csharp'])await fs.mkdir(path.join(root,'server/adapters/impl',name),{recursive:true});
+    await fs.writeFile(path.join(root,'traceability/index.rst'),'Index\n=====\n\n.. toctree::\n\n   requirements\n\n'+['frontend','backend','tests','cpp','python','go','rust','csharp'].map(name=>`.. src-trace::\n   :project: ${name}\n`).join('\n'));
+  }
+  await exportNeeds(root);
+  return root;
+}
+
+test('旧独立项目无 Python 配置仍保留引用形状、保存及显式来源',async t=>{
+  const root=await fixture(t);let result=await traceability(root);
+  assert.equal(result.index.state,'unconfigured');assert.equal(result.index.source,'local-marker');
+  assert.deepEqual(result.requirements[0].tests,[{path:'tests/demo.mjs',line:1}]);
+  result=await updateRequirement({id:'REQ_ONE',revision:1,title:'原需求',description:'原描述',action:'confirm'},root);
+  assert.equal(result.requirements[0].status,'confirmed');
+});
+
+test('一节点多需求、跨节点关联与验收独立确认保留旧文字确认',async t=>{
+  const root=await fixture(t);
+  let view=await updateRequirement({id:'REQ_ONE',revision:1,title:'原需求',description:'原描述',action:'confirm'},root);
+  const original=view.requirements[0];
+  const acceptance=[{id:'AC_ONE',input:'1,2',expected:'1.5',observable:'显示平均值'}];
+  view=await updateRequirement({id:'REQ_ONE',revision:2,title:original.title,description:original.description,action:'save',acceptance,nodeIds:['one','two']},root);
+  let req=view.requirements[0];assert.equal(req.status,'confirmed');assert.equal(req.confirmedAt,original.confirmedAt);assert.deepEqual(req.confirmedText,original.confirmedText);assert.equal(req.acceptanceStatus,'draft');
+  view=await updateRequirement({featureId:'demo',id:'REQ_TWO',nodeIds:['one'],title:'另一需求',description:'共享节点',action:'create'},root);
+  assert.equal(view.requirements.filter(r=>r.nodeIds.includes('one')).length,2);
+  assert.match(await fs.readFile(path.join(root,'traceability/requirements.rst'),'utf8'),/:fulfills: REQ_ONE, REQ_TWO/);
+  view=await updateRequirement({id:'REQ_ONE',revision:req.revision,title:req.title,description:req.description,action:'save',confirmAcceptance:true},root);
+  req=view.requirements[0];assert.equal(req.acceptanceStatus,'confirmed');assert.deepEqual(req.confirmedAcceptance,acceptance);
+  const disk=JSON.parse(await fs.readFile(path.join(root,'contracts/requirements.json'),'utf8'));disk.requirements[0].acceptance[0].expected='2';await fs.writeFile(path.join(root,'contracts/requirements.json'),JSON.stringify(disk));
+  req=(await traceability(root)).requirements[0];assert.equal(req.acceptanceStatus,'draft');assert.equal(req.status,'confirmed');
+});
+
+test('真实 Sphinx 构建统一需求关系、多 CodeLinks 引用与 Java/PHP 兼容来源',{skip:!existsSync(python)&&'先运行 uv sync --locked 启用真实 Sphinx 集成测试'},async t=>{
+  const root=await fixture(t,{configured:true});
+  const built=await buildTraceabilityIndex(root,undefined,{python});
+  assert.equal(built.index.state,'current',built.index.error);
+  assert.equal(built.index.source,'sphinx-needs+codelinks');
+  assert.equal(built.relations.find(r=>r.id==='FUNC_6F6E65').fulfills[0],'REQ_ONE');
+  assert.deepEqual(built.relations.find(r=>r.id==='FUNC_6F6E65').contains,['FUNC_74776F']);
+  assert.deepEqual(built.relations.find(r=>r.id==='FUNC_6F6E65').flowsTo,['FUNC_74776F']);
+  const req=built.requirements[0];
+  for(const file of ['src/demo.ts','server/adapters/impl/cpp/demo.cpp'])assert.ok(req.code.some(ref=>ref.path===file&&ref.source==='sphinx-codelinks'),file);
+  assert.ok(req.tests.some(ref=>ref.path==='tests/demo.mjs'&&ref.source==='sphinx-codelinks'));
+  for(const file of ['server/adapters/impl/java/Demo.java','server/adapters/impl/php/demo.php'])assert.ok(req.code.some(ref=>ref.path===file&&ref.source==='local-marker'),file);
+  assert.match((await sourceAt('server/adapters/impl/cpp/demo.cpp',1,root)).excerpt,/int demo/);
+  assert.equal(await normalizeCodeUrl(root,'../outside#L1'),null);
+  assert.equal(await normalizeCodeUrl(root,'https://example.com/evil#L1'),null);
+  assert.equal(await normalizeCodeUrl(root,'src/demo.ts#L999'),null);
+  const previous=await fs.readFile(path.join(root,'traceability/_build/needs/needs.json'),'utf8');
+  // A successful build of old RST must not certify externally edited JSON.
+  const requirementFile=path.join(root,'contracts/requirements.json');
+  const edited=JSON.parse(await fs.readFile(requirementFile,'utf8'));edited.requirements[0].title='外部编辑';
+  await fs.writeFile(requirementFile,JSON.stringify(edited));
+  await buildNeedsIndex(root,{python});
+  assert.equal((await traceability(root)).index.state,'stale');
+  edited.requirements[0].title='原需求';await fs.writeFile(requirementFile,JSON.stringify(edited));
+  await fs.writeFile(path.join(root,'src/demo.ts'),'// moved\n// @need-ids: REQ_ONE\nexport const value=1;\n');
+  assert.equal((await readNeedsIndex(root)).index.state,'stale');
+  await assert.rejects(sourceAt('src/demo.ts',1,root),e=>e.status===404);
+  const failed=await buildNeedsIndex(root,{runner:async()=>{throw Error('deliberate build failure');}});
+  assert.equal(failed.state,'failed');assert.match(failed.error,/deliberate/);
+  const preserved=JSON.parse(await fs.readFile(path.join(root,'traceability/_build/needs/needs.json'),'utf8'));
+  assert.deepEqual(preserved.versions[preserved.current_version].needs,JSON.parse(previous).versions[''].needs);
+  const saved=await updateRequirement({id:'REQ_ONE',revision:1,title:'已保存原文',description:'原描述',action:'save'},root);
+  assert.equal(saved.requirements[0].title,'已保存原文');assert.equal(saved.index.state,'failed');
+  assert.equal(JSON.parse(await fs.readFile(path.join(root,'contracts/requirements.json'),'utf8')).requirements[0].title,'已保存原文');
+});
+
+test('显式重建仅同步已存在来源，旧独立调用无需补齐其他示例或 Python',async t=>{
+  const root=await fixture(t);
+  const file=path.join(root,'contracts/requirements.json');
+  const data=JSON.parse(await fs.readFile(file,'utf8'));data.requirements[0].title='外部修改的旧项目';
+  const original=JSON.stringify(data);await fs.writeFile(file,original);
+  const result=await buildTraceabilityIndex(root);
+  assert.equal(result.sphinx.state,'current');assert.equal(result.index.state,'unconfigured');
+  assert.match(await fs.readFile(path.join(root,'traceability/requirements.rst'),'utf8'),/外部修改的旧项目/);
+  assert.equal(await fs.readFile(file,'utf8'),original);
+  assert.equal(existsSync(path.join(root,'contracts/calculator.json')),false);
+});
+
+test('显式重建同步 suite 的三个外部修改来源并真正恢复 current',{skip:!existsSync(python)&&'先运行 uv sync --locked 启用真实 Sphinx 集成测试'},async t=>{
+  const root=await fixture(t,{configured:true});
+  for(const name of ['calculator','sum','expression','calculator-suite']) {
+    for(const suffix of ['.json','.requirements.json'])await fs.copyFile(path.join(project,'contracts',name+suffix),path.join(root,'contracts',name+suffix));
+  }
+  await fs.copyFile(path.join(project,'traceability/index.rst'),path.join(root,'traceability/index.rst'));
+  // The no-feature CLI path must export every existing registered source pair.
+  let result=await buildTraceabilityIndex(root,undefined,{python});
+  assert.equal(result.index.state,'current',result.index.error);
+  for(const name of ['calculator','sum','expression','calculator-suite'])assert.equal(existsSync(path.join(root,'traceability',name+'.rst')),true);
+  const modified=[];
+  for(const name of ['calculator','sum','expression']) {
+    const file=path.join(root,'contracts',name+'.requirements.json');
+    const data=JSON.parse(await fs.readFile(file,'utf8'));
+    data.requirements[0].title+='（外部修改）';
+    const bytes=JSON.stringify(data);await fs.writeFile(file,bytes);
+    modified.push({file,bytes,id:data.requirements[0].id,title:data.requirements[0].title});
+  }
+  assert.equal((await traceability(root,'calculator.suite')).index.state,'stale');
+  result=await buildTraceabilityIndex(root,'calculator.suite',{python});
+  assert.equal(result.index.state,'current',result.index.error);
+  const {needs}=await readNeedsIndex(root);
+  for(const changed of modified) {
+    assert.equal(needs[changed.id].title,changed.title);
+    assert.equal(result.requirements.find(r=>r.id===changed.id).title,changed.title);
+    assert.equal(await fs.readFile(changed.file,'utf8'),changed.bytes);
+  }
+});
