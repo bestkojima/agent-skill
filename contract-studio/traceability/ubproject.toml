@@ -1,3 +1,9 @@
+[needs.types.spec.fields.importance]
+description = "Node importance, independent of execution and verification status"
+schema = { type = "string", enum = ["core", "key", "normal"] }
+default = "normal"
+nullable = false
+
 [needs.links.fulfills]
 outgoing = "fulfills"
 incoming = "fulfilled by"

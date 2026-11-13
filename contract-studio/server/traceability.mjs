@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { readNeedsIndex, buildNeedsIndex, indexConfigured } from './needs-index.mjs';
+import { nodeImportance } from '../src/node-importance.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const features = Object.freeze({
@@ -67,6 +68,7 @@ function validateGraph(graph, featureId) {
   const ids = new Set();
   for (const node of graph.nodes) {
     if (typeof node.id !== 'string' || !node.id || ids.has(node.id) || typeof node.title !== 'string' || !node.title.trim() || !node.position || !Number.isFinite(node.position.x) || !Number.isFinite(node.position.y)) throw new TraceError('功能图节点 ID、标题或位置无效');
+    try { nodeImportance(node.importance); } catch (error) { throw new TraceError(`${node.id}: ${error.message}`); }
     ids.add(node.id);
   }
   for (const node of graph.nodes) {
@@ -124,6 +126,7 @@ function rstText(data, graph, feature = featureConfig()) {
     const destinations = [...new Set(outgoing.map(e => functionId(e.target)))];
     const requirements = data.requirements.filter(r => nodeIdsOf(r).includes(node.id)).map(r => r.id);
     lines.push(`.. spec:: ${esc(node.title)}`, `   :id: ${functionId(node.id)}`);
+    if (node.importance !== undefined) lines.push(`   :importance: ${node.importance}`);
     if (requirements.length) lines.push(`   :fulfills: ${requirements.join(', ')}`);
     if (children.length) lines.push(`   :contains: ${children.join(', ')}`);
     if (destinations.length) lines.push(`   :flows_to: ${destinations.join(', ')}`);
@@ -207,7 +210,7 @@ export async function traceability(root = projectRoot, featureId) {
   if(index.state==='current'&&!indexSourcesCurrent) {
     index.state='stale';index.message='需求源与 RST 未同步，索引尚未包含当前源内容。';
   }
-  const relations = Object.values(needs).filter(need => need.type === 'spec').map(need => ({id:need.id,title:need.title,fulfills:need.fulfills??[],contains:need.contains??[],flowsTo:need.flows_to??[]}));
+  const relations = Object.values(needs).filter(need => need.type === 'spec').map(need => ({id:need.id,title:need.title,importance:nodeImportance(need.importance),fulfills:need.fulfills??[],contains:need.contains??[],flowsTo:need.flows_to??[]}));
   return { featureId: data.featureId, source: feature.requirementFile, projectGraph: graph, sphinx: { path: feature.rstFile, state: sphinxState }, index, relations,
     ubcode: {state:'not-connected',message:'未接入（可选）'},
     requirements: data.requirements.map(r => ({ ...r,

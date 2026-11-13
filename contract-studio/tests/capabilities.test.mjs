@@ -12,7 +12,7 @@ test('能力登记保持后端、前端、节点和测试一一可查',()=>{
   caps[0].nodeIds.push('not-persisted');assert.ok(!listCapabilities()[0].nodeIds.includes('not-persisted'));
 });
 
-test('真实固定测试报告持久化；行为变化过期，纯布局变化保持有效',async t=>{
+test('真实固定测试报告持久化；行为变化过期，布局与重要性变化保持有效',async t=>{
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'studio-evidence-'));
   t.after(()=>fs.rm(root,{recursive:true,force:true}));
   for(const dir of ['tests','contracts','server'])await fs.mkdir(path.join(root,dir));
@@ -28,6 +28,10 @@ test('真实固定测试报告持久化；行为变化过期，纯布局变化�
   assert.equal((await capabilityEvidence('average.calculate',root)).state,'passed');
   graph.nodes[0].position.x=9;await fs.writeFile(graphFile,JSON.stringify(graph));
   assert.equal((await capabilityEvidence('average.calculate',root)).state,'passed');
+  for(const importance of ['core','key','normal',undefined]) {
+    graph.nodes[0].importance=importance;await fs.writeFile(graphFile,JSON.stringify(graph));
+    assert.equal((await capabilityEvidence('average.calculate',root)).state,'passed',`importance=${importance}`);
+  }
   graph.nodes[0].input='修改后的输入约束';await fs.writeFile(graphFile,JSON.stringify(graph));
   assert.equal((await capabilityEvidence('average.calculate',root)).state,'stale');
   await fs.writeFile(path.join(root,'tests/average.test.mjs'),"import test from 'node:test';test('actual failure',()=>{throw Error('failure evidence')});\n");

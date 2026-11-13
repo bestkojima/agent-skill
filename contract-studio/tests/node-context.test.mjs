@@ -63,3 +63,17 @@ test('叶节点仅包含其直接依赖，空功能组准确呈现未定义关�
   assert.doesNotMatch(leaf, /直接子节点契约|深层辅助实现|收集数字/);
   assert.match(describeNodeContext({ nodes: [node('empty', '待设计功能', null, { kind: 'group' })], edges: [] }, 'empty'), /尚无直接子节点/);
 });
+
+test('节点任务上下文带有自身、直接依赖与子节点的重要性，缺省普通且实时更新', () => {
+  const graph = fixture();
+  graph.nodes.find(node => node.id === 'average').importance = 'core';
+  graph.nodes.find(node => node.id === 'input').importance = 'key';
+  graph.nodes.find(node => node.id === 'validate').importance = 'key';
+  const text = describeNodeContext(graph, 'average');
+  assert.match(text, /节点重要性\n核心逻辑 \(core\)/);
+  assert.match(text, /输出：收集数字输出\n重要性：关键逻辑 \(key\)/);
+  assert.match(text, /输出：展示结果输出\n重要性：普通组成逻辑 \(normal\)/);
+  assert.match(text, /validate · 校验数字\n[\s\S]*?重要性：关键逻辑 \(key\)/);
+  graph.nodes.find(node => node.id === 'average').importance = 'normal';
+  assert.match(describeNodeContext(graph, 'average'), /节点重要性\n普通组成逻辑 \(normal\)/);
+});

@@ -149,3 +149,20 @@
 @keyframes result-reveal{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
 @media(max-width:460px){.node-drawer .inspector{padding:14px}.property-grid{grid-template-columns:1fr}.average-summary{gap:5px}.average-summary>div{padding:10px}.average-summary dd{font-size:21px}.index-status{align-items:start}}
 @media(prefers-reduced-motion:reduce){.average-summary{animation:none}.expression-calculator-key,.node-card,.suite-modes button{transition:none}.react-flow__edge.animated path{animation:none}}
+
+/* Importance has its own accent; runtime success/failure retains the outer border. */
+.importance-core{--importance-accent:#8b5cb5;--importance-ink:#70419a;--importance-tint:#f3edf9}
+.importance-key{--importance-accent:#c18a25;--importance-ink:#8a590e;--importance-tint:#fff4dc}
+.importance-normal{--importance-accent:#8297a7;--importance-ink:#526879;--importance-tint:#edf2f6}
+.importance-badge{display:inline-flex;align-items:center;gap:5px;flex:none;white-space:nowrap;padding:2px 6px;border-radius:4px;background:var(--importance-tint);color:var(--importance-ink);font-size:11px;font-weight:650;line-height:1.4;transition:color .15s,background-color .15s}
+.importance-badge::before{content:"";width:5px;height:5px;flex:none;border-radius:2px;background:var(--importance-accent)}
+.node-card[class*="importance-"]{border-left:4px solid var(--importance-accent)}
+.node-card .node-kicker{align-items:center;gap:3px;min-height:19px;font-size:10px}
+.node-card .node-kicker>span:last-child{white-space:nowrap}
+.group-heading[class*="importance-"]{border-left:4px solid var(--importance-accent);border-radius:10px 0 0 0;gap:12px;transition:border-color .15s}
+.group-identity{display:flex;align-items:center;gap:9px;flex-wrap:wrap;min-width:0}
+.group-identity .group-requirement,.group-identity .group-run{margin-left:0}
+.importance-legend{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:7px 15px;border-bottom:1px solid #edf1f4;background:#fff;color:#6c8090;font-size:12px}
+.importance-legend>span:first-child{margin-right:3px}
+.field .importance-select{border-left:4px solid var(--importance-accent);color:var(--importance-ink);transition:border-color .15s,color .15s}
+@media(prefers-reduced-motion:reduce){.importance-badge,.group-heading[class*="importance-"],.field .importance-select{transition:none}}

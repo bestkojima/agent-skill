@@ -42,7 +42,8 @@
       "errors": [],
       "fixture": {},
       "code": "",
-      "test": ""
+      "test": "",
+      "importance": "normal"
     },
     {
       "id": "suite-compute",
@@ -63,7 +64,8 @@
       "errors": [],
       "fixture": {},
       "code": "",
-      "test": ""
+      "test": "",
+      "importance": "core"
     },
     {
       "id": "suite-result",
@@ -80,7 +82,8 @@
       "errors": [],
       "fixture": {},
       "code": "",
-      "test": ""
+      "test": "",
+      "importance": "normal"
     },
     {
       "id": "calculator",
@@ -156,7 +159,8 @@
       },
       "code": "server/calculator.mjs#validateCalculatorInput",
       "test": "tests/calculator.test.mjs",
-      "capabilityId": "calculator.calculate"
+      "capabilityId": "calculator.calculate",
+      "importance": "key"
     },
     {
       "id": "calc-compute",
@@ -300,7 +304,8 @@
       },
       "code": "server/sum.mjs#validateSumInput",
       "test": "tests/sum.test.mjs",
-      "capabilityId": "sum.calculate"
+      "capabilityId": "sum.calculate",
+      "importance": "key"
     },
     {
       "id": "sum-accumulate",
@@ -490,7 +495,8 @@
       },
       "code": "server/expression.mjs#parseExpression",
       "test": "tests/expression.test.mjs",
-      "capabilityId": "expression.calculate"
+      "capabilityId": "expression.calculate",
+      "importance": "key"
     },
     {
       "id": "expr-evaluate",
@@ -622,7 +628,8 @@
             "type": "array"
           }
         }
-      }
+      },
+      "importance": "core"
     },
     {
       "input": "一个或多个有限数字",
@@ -667,7 +674,8 @@
         "y": 100
       },
       "processing": "保留输入顺序与项位置；允许负数、小数、零和科学计数。",
-      "code": "server/average.mjs#validateAverageInput"
+      "code": "server/average.mjs#validateAverageInput",
+      "importance": "key"
     },
     {
       "input": "一个或多个有限数字",
@@ -711,7 +719,8 @@
         "y": 100
       },
       "processing": "从零开始累加；中间结果溢出则保留已经完成的步骤并停止。",
-      "code": "server/average.mjs#accumulateAverage"
+      "code": "server/average.mjs#accumulateAverage",
+      "importance": "key"
     },
     {
       "input": "一个或多个有限数字",
@@ -755,7 +764,8 @@
         "y": 100
       },
       "processing": "总和 ÷ 数量，使用 JavaScript 浮点数语义。",
-      "code": "server/average.mjs#computeAverage"
+      "code": "server/average.mjs#computeAverage",
+      "importance": "core"
     }
   ],
   "edges": [

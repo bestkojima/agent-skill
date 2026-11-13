@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
 import { listCapabilities } from '../server/capabilities.mjs';
+import { nodeImportance } from '../src/node-importance.mjs';
 const capabilities=new Set(listCapabilities().map(cap=>cap.id));
 for(const file of fs.readdirSync('contracts').filter(name=>name.endsWith('.json'))) {
   const graph=JSON.parse(fs.readFileSync(`contracts/${file}`,'utf8'));
@@ -9,6 +10,7 @@ for(const file of fs.readdirSync('contracts').filter(name=>name.endsWith('.json'
   const nodes=new Map(graph.nodes.map(node=>[node.id,node]));
   assert.equal(nodes.size,graph.nodes.length,`${file}: duplicate node ID`);
   for(const node of graph.nodes) {
+    nodeImportance(node.importance);
     assert.ok(node.id&&node.title&&node.position&&Number.isFinite(node.position.x)&&Number.isFinite(node.position.y),`${file}: invalid node ${node.id}`);
     if(node.capabilityId)assert.ok(capabilities.has(node.capabilityId),`${file}: unknown capability ${node.capabilityId}`);
     const visited=new Set([node.id]);let parent=node.parentId;

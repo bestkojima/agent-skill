@@ -61,12 +61,21 @@ test('一节点多需求、跨节点关联与验收独立确认保留旧文字�
 
 test('真实 Sphinx 构建统一需求关系、多 CodeLinks 引用与 Java/PHP 兼容来源',{skip:!existsSync(python)&&'先运行 uv sync --locked 启用真实 Sphinx 集成测试'},async t=>{
   const root=await fixture(t,{configured:true});
+  const graphFile=path.join(root,'contracts/feedback.json');
+  const graph=JSON.parse(await fs.readFile(graphFile,'utf8'));graph.nodes[0].importance='core';
+  await fs.writeFile(graphFile,JSON.stringify(graph));
   const built=await buildTraceabilityIndex(root,undefined,{python});
   assert.equal(built.index.state,'current',built.index.error);
   assert.equal(built.index.source,'sphinx-needs+codelinks');
   assert.equal(built.relations.find(r=>r.id==='FUNC_6F6E65').fulfills[0],'REQ_ONE');
   assert.deepEqual(built.relations.find(r=>r.id==='FUNC_6F6E65').contains,['FUNC_74776F']);
   assert.deepEqual(built.relations.find(r=>r.id==='FUNC_6F6E65').flowsTo,['FUNC_74776F']);
+  assert.equal(built.relations.find(r=>r.id==='FUNC_6F6E65').importance,'core');
+  assert.equal(built.relations.find(r=>r.id==='FUNC_74776F').importance,'normal');
+  const {needs}=await readNeedsIndex(root);
+  assert.equal(needs.FUNC_6F6E65.importance,'core');
+  assert.equal(needs.FUNC_74776F.importance,'normal');
+  assert.equal(needs.REQ_ONE.importance,null); // Field belongs to spec nodes, not requirement confirmation.
   const req=built.requirements[0];
   for(const file of ['src/demo.ts','server/adapters/impl/cpp/demo.cpp'])assert.ok(req.code.some(ref=>ref.path===file&&ref.source==='sphinx-codelinks'),file);
   assert.ok(req.tests.some(ref=>ref.path==='tests/demo.mjs'&&ref.source==='sphinx-codelinks'));

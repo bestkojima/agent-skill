@@ -77,7 +77,7 @@ async function candidate(root, cap) {
         contracts.push({file,id:req.id,title:req.title,description:req.description,nodeIds:req.nodeIds??[req.nodeId],acceptance:req.acceptance??[]});
       }
     } else if (Array.isArray(value.nodes)) {
-      const nodes=value.nodes.filter(node=>cap.nodeIds.includes(node.id)||node.capabilityId===cap.id).map(({position,size,...node})=>node);
+      const nodes=value.nodes.filter(node=>cap.nodeIds.includes(node.id)||node.capabilityId===cap.id).map(({position,size,importance,...node})=>node);
       const ids=new Set(nodes.map(node=>node.id));
       if (nodes.length) contracts.push({file,nodes,edges:value.edges?.filter(edge=>ids.has(edge.source)||ids.has(edge.target))});
     }

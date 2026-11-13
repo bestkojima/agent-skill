@@ -1,7 +1,8 @@
 import { useState } from 'react';
+import { importanceLabels, nodeImportance, type Importance } from './node-importance.mjs';
 
 export type PropertyNode = {
-  id:string; title:string; parentId:string|null; kind:'group'|'ui'|'logic'|'async'|'action';
+  id:string; title:string; parentId:string|null; kind:'group'|'ui'|'logic'|'async'|'action'; importance?:Importance;
   description:string; input:string; output:string; processing?:string; acceptance?:string;
   errors:string[]; inputSchema?:Record<string,unknown>; outputSchema?:Record<string,unknown>;
   capabilityId?:string; position:{x:number;y:number}; size?:{width:number;height:number};
@@ -40,6 +41,7 @@ export function NodeProperties({node,nodes,capabilities,onPatch,onSave,saving,ca
       <div className="field"><label htmlFor="node-kind">节点类型</label><select id="node-kind" value={node.kind} onChange={event=>{const kind=event.target.value as PropertyNode['kind'];onPatch({kind,...(kind==='group'&&!node.size?{size:{width:970,height:415}}:{})})}}>{Object.entries(kinds).map(([id,title])=><option key={id} value={id} disabled={hasChildren&&id!=='group'}>{title}</option>)}</select></div>
       <div className="field"><label htmlFor="node-parent">所属功能组</label><select id="node-parent" value={node.parentId??''} disabled={!node.parentId} onChange={event=>onPatch({parentId:event.target.value,position:{x:35,y:90}})}>{!node.parentId&&<option value="">项目根节点</option>}{parents.map(parent=><option key={parent.id} value={parent.id}>{parent.title}</option>)}</select></div>
     </div>
+    <div className="field"><label htmlFor="node-importance">逻辑重要性</label><select id="node-importance" className={`importance-select importance-${nodeImportance(node.importance)}`} value={nodeImportance(node.importance)} onChange={event=>onPatch({importance:nodeImportance(event.target.value)})}>{Object.entries(importanceLabels).map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></div>
     <div className="property-section-title">行为契约</div>
     <div className="field"><label htmlFor="node-description">职责与描述</label><textarea id="node-description" rows={3} value={node.description} onChange={event=>onPatch({description:event.target.value})}/></div>
     <div className="field"><label htmlFor="node-input">输入</label><input id="node-input" value={node.input} onChange={event=>onPatch({input:event.target.value})}/></div>

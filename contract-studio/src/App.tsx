@@ -14,10 +14,11 @@ import { prepareCalculatorRequest, normalizeCalculatorResult, type CalculatorMod
 import { NodeProperties } from './NodeProperties';
 import { CapabilityPanel, type Capability } from './CapabilityPanel';
 import { describeNodeContext } from './node-context.mjs';
+import { importanceLabels, importanceLabel, nodeImportance, type Importance } from './node-importance.mjs';
 
 type Kind = 'group' | 'ui' | 'logic' | 'async' | 'action';
 type Spec = {
-  id:string; parentId:string|null; title:string; kind:Kind; description:string;
+  id:string; parentId:string|null; title:string; kind:Kind; description:string; importance?:Importance;
   position:{x:number;y:number}; size?:{width:number;height:number};
   input:string;output:string;errors:string[];fixture:Record<string,unknown>;code:string;test:string;processing?:string;acceptance?:string;inputSchema?:Record<string,unknown>;outputSchema?:Record<string,unknown>;capabilityId?:string;
 };
@@ -42,7 +43,7 @@ const toGraph=(text:string):Graph=>{
   const graph=g as Graph;
   if(!Array.isArray(graph.nodes)||!Array.isArray(graph.edges))throw Error('nodes / edges 必须是数组');
   if(new Set(graph.nodes.map(n=>n.id)).size!==graph.nodes.length)throw Error('节点 ID 重复');
-  for(const n of graph.nodes){if(!n.id||!n.position||!n.title)throw Error('节点缺少 id/position/title');}
+  for(const n of graph.nodes){if(!n.id||!n.position||!n.title)throw Error('节点缺少 id/position/title');nodeImportance(n.importance);}
   for(const e of graph.edges){if(!graph.nodes.some(n=>n.id===e.source)||!graph.nodes.some(n=>n.id===e.target))throw Error(`连线 ${e.id} 引用了不存在的节点`)}
   return graph;
 };
@@ -66,17 +67,19 @@ function NodeCard({data}:NodeProps<DisplayNode>){
   const runLabel=run==='mock'?'○ Mock':derived?run==='ok'?'✓ 运行汇总':'! 失败汇总':run==='ok'?'✓ 已执行':run==='rejected'?'! 已拒绝':'';
   const requirementLabel=requirement?(hasUnsavedRequirement?'需求未保存':requirement.status==='confirmed'?'需求已确认':'需求待确认'):(traceAvailable?'需求未关联':'');
   const isComputationGroup=spec.id==='expr-compute'||spec.id==='suite-compute';
+  const importance=nodeImportance(spec.importance);
+  const badge=<span className={`importance-badge importance-${importance}`} title={`${labelFor(spec.kind)} · ${importanceLabel(importance)}`}>{importanceLabel(importance)}</span>;
   if(spec.kind==='group' && hasChildren && !collapsed){
-    return <div className={`group-heading ${isComputationGroup?'nested-compute-heading':''}`}>
+    return <div className={`group-heading importance-${importance} ${isComputationGroup?'nested-compute-heading':''}`}>
       {isComputationGroup&&<Handle id="in" type="target" position={Position.Left} className="flow-handle"/>}
-      <span><span className="group-name">{spec.title}</span>{requirementLabel&&<span className={`group-requirement ${!hasUnsavedRequirement&&requirement?.status==='confirmed'?'confirmed':''}`}>{requirementLabel}</span>}{isComputationGroup&&run&&<span className={`group-run ${run}`}>{runLabel}</span>}</span>
+      <span className="group-identity"><span className="group-name">{spec.title}</span>{badge}{requirementLabel&&<span className={`group-requirement ${!hasUnsavedRequirement&&requirement?.status==='confirmed'?'confirmed':''}`}>{requirementLabel}</span>}{isComputationGroup&&run&&<span className={`group-run ${run}`}>{runLabel}</span>}</span>
       <span className="node-actions"><button className="node-add nodrag" aria-label={`在${spec.title}中添加节点`} onClick={e=>{e.stopPropagation();addChild(spec.id)}}>＋ 添加</button><button className="node-toggle nodrag" aria-expanded="true" onClick={(e)=>{e.stopPropagation();toggle(spec.id)}}>{isComputationGroup?'折叠计算步骤 −':'折叠 −'}</button></span>
       {isComputationGroup&&<><Handle id="ok" type="source" position={Position.Right} style={{top:'36%'}} className="flow-handle"/><Handle id="fail" type="source" position={Position.Right} style={{top:'76%',background:'#c27d56'}} className="flow-handle"/></>}
     </div>;
   }
-  return <div className={`node-card node-${spec.kind} ${run==='rejected'?'node-failed':''} ${run==='ok'?'node-passed':''}`}>
+  return <div className={`node-card node-${spec.kind} importance-${importance} ${run==='rejected'?'node-failed':''} ${run==='ok'?'node-passed':''}`}>
     <Handle id="in" type="target" position={Position.Left} className="flow-handle"/>
-    <div className="node-kicker"><span>{labelFor(spec.kind)}</span><span>{runLabel}</span></div>
+    <div className="node-kicker">{badge}<span>{runLabel}</span></div>
     <div className="node-name">{spec.title}</div>{requirementLabel&&<div className={`node-requirement ${!hasUnsavedRequirement&&requirement?.status==='confirmed'?'confirmed':''}`}>{requirementLabel}</div>}{spec.id==='validate'&&<div className="node-runtime">Adapter: {language}</div>}
     {hasChildren&&<button className="node-toggle nodrag" aria-expanded="false" onClick={(e)=>{e.stopPropagation();toggle(spec.id)}}>{isComputationGroup?'展开计算步骤 +':'展开子节点 +'}</button>}
     {spec.kind==='group'&&<button className="node-add nodrag" aria-label={`在${spec.title}中添加节点`} onClick={e=>{e.stopPropagation();addChild(spec.id)}}>＋ 添加</button>}
@@ -455,11 +458,12 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
   const REQUIREMENT_DRAFT_KEY=isSuite?'contract-studio-suite-requirement-drafts-v1':isExpression?'contract-studio-expression-requirement-drafts-v1':isSum?'contract-studio-sum-requirement-drafts-v1':isCalculator?'contract-studio-calculator-requirement-drafts-v1':'contract-studio-requirement-drafts-v1';
   const traceUrl=isSuite?'/api/traceability?feature=suite':isExpression?'/api/traceability?feature=expression':isSum?'/api/traceability?feature=sum':isCalculator?'/api/traceability?feature=calculator':'/api/traceability';
   const [initial]=useState(()=>{
-    let graph=clone(original),hasDraft=false,base:Graph|null=null;
-    try{const text=localStorage.getItem(JSON_KEY);if(text){graph=toGraph(text);hasDraft=true}}catch{/* Keep the usable bundled example. */}
+    let graph=clone(original),hasDraft=false,base:Graph|null=null,rawDraft='',draftError='';
+    try{rawDraft=localStorage.getItem(JSON_KEY)??'';if(rawDraft){hasDraft=true;graph=toGraph(rawDraft)}}catch(error){draftError=String(error)}
     try{const text=localStorage.getItem(GRAPH_BASE_KEY);if(text)base=toGraph(text)}catch{/* A missing baseline requires explicit reconciliation. */}
-    return {graph,hasDraft,base};
+    return {graph,hasDraft,base,rawDraft,draftError};
   });
+  const [draftReadError,setDraftReadError]=useState(initial.draftError);
   const [graph,setGraph]=useState<Graph>(initial.graph);
   const [graphBase,setGraphBase]=useState<Graph|null>(initial.base);
   const [graphReady,setGraphReady]=useState(false);
@@ -539,8 +543,8 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
   const selectedRequirement=selectedRequirements.find(requirement=>requirement.id===activeRequirementId)??selectedRequirements[0];
   const selectedCapability=selected?.capabilityId?capabilities.find(capability=>capability.id===selected.capabilityId):capabilities.find(capability=>capability.nodeIds.includes(selectedId));
   const degree={in:graph.edges.filter(x=>x.target===selectedId).length,out:graph.edges.filter(x=>x.source===selectedId).length};
-  useEffect(()=>{localStorage.setItem(JSON_KEY,JSON.stringify(graph))},[graph]);
-  useEffect(()=>{if(graphBase)localStorage.setItem(GRAPH_BASE_KEY,JSON.stringify(graphBase));else localStorage.removeItem(GRAPH_BASE_KEY)},[graphBase]);
+  useEffect(()=>{if(!draftReadError)localStorage.setItem(JSON_KEY,JSON.stringify(graph))},[graph,draftReadError]);
+  useEffect(()=>{if(draftReadError)return;if(graphBase)localStorage.setItem(GRAPH_BASE_KEY,JSON.stringify(graphBase));else localStorage.removeItem(GRAPH_BASE_KEY)},[graphBase,draftReadError]);
   useEffect(()=>{localStorage.setItem(REQUIREMENT_DRAFT_KEY,JSON.stringify(requirementDrafts))},[requirementDrafts]);
   useEffect(()=>{setGraphMessage(null)},[graph]);
   useEffect(()=>{setFixture(JSON.stringify(selected?.fixture??{},null,2));setNodeResult(null);setError('');setSource(null);setActiveRequirementId('');setCreatingRequirement(false);setLinkRequirementId('');setLinkError('')},[selectedId]);
@@ -612,7 +616,7 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
       if(!parent||parent.kind!=='group')return g;
       const children=g.nodes.filter(n=>n.parentId===parentId);
       const y=Math.max(80,...children.map(n=>n.position.y+(n.size?.height??120)+28));
-      const node:Spec={id,parentId,title:'新功能节点',kind:'logic',description:'',position:{x:35,y},input:'待填写',output:'待填写',processing:'',acceptance:'',errors:[],fixture:{},code:'',test:''};
+      const node:Spec={id,parentId,title:'新功能节点',kind:'logic',importance:'normal',description:'',position:{x:35,y},input:'待填写',output:'待填写',processing:'',acceptance:'',errors:[],fixture:{},code:'',test:''};
       const size={width:Math.max(parent.size?.width??0,970),height:Math.max(parent.size?.height??0,y+160)};
       return {...g,nodes:[...g.nodes.map(n=>n.id===parentId?{...n,size}:n),node]};
     });
@@ -657,7 +661,7 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
   };
   const addNode=()=>{
     const id=`step-${Date.now().toString(36)}`;
-    const node:Spec={id,parentId:rootId,title:'待实现功能',kind:'logic',description:'请先描述输入、处理、输出及异常。',position:{x:35,y:260},input:'Any',output:'Any',errors:[],fixture:{},code:'',test:''};
+    const node:Spec={id,parentId:rootId,title:'待实现功能',kind:'logic',importance:'normal',description:'请先描述输入、处理、输出及异常。',position:{x:35,y:260},input:'Any',output:'Any',errors:[],fixture:{},code:'',test:''};
     setGraph(g=>({...g,nodes:[...g.nodes,node]}));setCollapsed(isExpression?old=>{const next=new Set(old);next.delete(rootId);return next}:new Set());setSelectedId(id);setFitVersion(n=>n+1);
   };
   const runSelected=async()=>{
@@ -673,7 +677,7 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
   const graphCompatible=!!projectGraph&&graph.feature?.id===traceability?.featureId;
   const graphDirty=!!graphBase&&!sameValue(graph,graphBase);
   const saveGraph=async()=>{
-    if(!graphBase||!graphCompatible||graphConflict)return;
+    if(draftReadError||!graphBase||!graphCompatible||graphConflict)return;
     const saved=clone(graph);
     setGraphBusy(true);setGraphMessage(null);
     try{
@@ -696,8 +700,8 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
       const current=await api<Traceability>(traceUrl);
       const project=toGraph(JSON.stringify(current.projectGraph));
       setTraceability(current);setTraceError('');
-      if(!sameValue(graph,project)&&!window.confirm('加载项目图会替换当前浏览器画布草稿。请先导出需要保留的草稿。确定继续吗？'))return;
-      setGraph(clone(project));setGraphBase(clone(project));setSelectedId(project.nodes[0]?.id??'');setCollapsed(initialCollapsed());setTrace([]);setFitVersion(n=>n+1);
+      if((draftReadError||!sameValue(graph,project))&&!window.confirm('加载项目图会替换当前浏览器画布草稿。请先导出需要保留的草稿。确定继续吗？'))return;
+      setDraftReadError('');setGraph(clone(project));setGraphBase(clone(project));setSelectedId(project.nodes[0]?.id??'');setCollapsed(initialCollapsed());setTrace([]);setFitVersion(n=>n+1);
       setGraphMessage({tone:'success',text:'已读取项目图。'});
     }catch(e){setGraphMessage({tone:'error',text:`无法读取项目图：${String(e)}。浏览器草稿未改变。`})}finally{setGraphBusy(false)}
   };
@@ -711,8 +715,8 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
       setGraphMessage({tone:'success',text:'已保留草稿并更新基线；确认无误后点击“保存到项目”。'});
     }catch(e){setGraphMessage({tone:'error',text:`无法更新基线：${String(e)}。浏览器草稿未改变。`})}finally{setGraphBusy(false)}
   };
-  const exportGraph=()=>{const blob=new Blob([JSON.stringify(graph,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`contract.${example}.json`;a.click();URL.revokeObjectURL(url)};
-  const importGraph=async(file?:File)=>{if(!file)return;try{const g=toGraph(await file.text());setGraph(g);setSelectedId(g.nodes[0]?.id??'');setTrace([]);setCollapsed(initialCollapsed());setFitVersion(n=>n+1);setGraphMessage(null)}catch(e){setGraphMessage({tone:'error',text:`无法导入画布：${String(e)}`})}};
+  const exportGraph=()=>{const blob=new Blob([draftReadError?initial.rawDraft:JSON.stringify(graph,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`contract.${example}${draftReadError?'.invalid-draft':''}.json`;a.click();URL.revokeObjectURL(url)};
+  const importGraph=async(file?:File)=>{if(!file)return;try{const g=toGraph(await file.text());setDraftReadError('');setGraph(g);setSelectedId(g.nodes[0]?.id??'');setTrace([]);setCollapsed(initialCollapsed());setFitVersion(n=>n+1);setGraphMessage(null)}catch(e){setGraphMessage({tone:'error',text:`无法导入画布：${String(e)}`})}};
   const selectNode=(id:string)=>{setSelectedId(id);setError('');setPanelOpen(true);setTab('property');setExpressionPane('detail')};
   const selectedPath:Spec[]=[];
   {let current=selected;const seen=new Set<string>();while(current&&!seen.has(current.id)){seen.add(current.id);selectedPath.unshift(current);current=current.parentId?byId.get(current.parentId):undefined}}
@@ -763,17 +767,19 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
   const exportNodeDocument=(task=false)=>{const blob=new Blob([task?nodeTask:nodeDocument],{type:'text/markdown;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`${selected?.id??'node'}${task?'.codex-task':''}.md`;a.click();URL.revokeObjectURL(url)};
   const graphStatus=!graphReady?'正在读取项目图…':traceError?'无法读取项目图，浏览器草稿仍可编辑':!graphCompatible?'画布功能与项目图不匹配':graphConflict?'项目图已变更，本地草稿未覆盖':!graphBase?'浏览器草稿缺少项目基线':graphDirty?'浏览器草稿 · 未保存到项目':'已与项目图同步';
   return <div className="studio-shell">
-    <header className="topbar"><div className="brand"><div className="brand-symbol">◇</div><div><strong>Contract Studio</strong><span>让功能可见，让实现可验</span></div></div><div className="top-actions">{!isSuite&&<button onClick={addNode} disabled={!graphReady}>＋ 添加节点</button>}<button onClick={()=>void saveGraph()} disabled={!graphReady||graphBusy||!!traceError||!graphCompatible||!graphBase||graphConflict||!graphDirty} className="save-project">{graphBusy?'处理中…':'保存到项目'}</button><button onClick={exportGraph}>导出 JSON</button><button onClick={()=>fileRef.current?.click()} disabled={!graphReady}>导入</button><button onClick={()=>{setGraph(clone(original));setSelectedId(defaultSelected);setCollapsed(initialCollapsed());setTrace([]);setFitVersion(n=>n+1)}} disabled={!graphReady}>重置画布</button><input hidden type="file" ref={fileRef} accept=".json,application/json" onChange={e=>{void importGraph(e.target.files?.[0]);e.target.value=''}}/></div></header>
+    <header className="topbar"><div className="brand"><div className="brand-symbol">◇</div><div><strong>Contract Studio</strong><span>让功能可见，让实现可验</span></div></div><div className="top-actions">{!isSuite&&<button onClick={addNode} disabled={!graphReady}>＋ 添加节点</button>}<button onClick={()=>void saveGraph()} disabled={!!draftReadError||!graphReady||graphBusy||!!traceError||!graphCompatible||!graphBase||graphConflict||!graphDirty} className="save-project">{graphBusy?'处理中…':'保存到项目'}</button><button onClick={exportGraph}>导出 JSON</button><button onClick={()=>fileRef.current?.click()} disabled={!graphReady}>导入</button><button onClick={()=>{if(draftReadError&&!window.confirm('重置会替换被拒绝的草稿，请先导出需要保留的原稿。继续吗？'))return;setDraftReadError('');setGraph(clone(original));setSelectedId(defaultSelected);setCollapsed(initialCollapsed());setTrace([]);setFitVersion(n=>n+1)}} disabled={!graphReady}>重置画布</button><input hidden type="file" ref={fileRef} accept=".json,application/json" onChange={e=>{void importGraph(e.target.files?.[0]);e.target.value=''}}/></div></header>
     <div className="subheader"><div className="example-switcher"><label htmlFor="studio-example">示例项目</label><select id="studio-example" value={example} onChange={e=>onExampleChange(e.target.value as Example)}><option value="suite">计算器</option><option value="feedback">反馈工单</option>{isExpression&&<option value="expression">混合四则运算（旧版）</option>}{isSum&&<option value="sum">多数字求和（旧版）</option>}{isCalculator&&<option value="calculator">四则计算器（旧版）</option>}</select></div><span className="sub-caption">需求 · 功能图 · 实现与测试</span></div>
     {isFeedback&&<div className="adapter-bar"><label htmlFor="adapter-lang">校验节点的后端语言</label><select id="adapter-lang" value={selectedLanguage} onChange={e=>{setSelectedLanguage(e.target.value);setNodeResult(null);setSource(null);setTrace([])}}>{(adapters.length?adapters:[{id:'javascript',label:'Node.js / JavaScript',available:true,missing:[],source:'',buildOnFirstUse:false}]).map(a=><option key={a.id} value={a.id} disabled={!a.available}>{a.label}{a.available?'':'（缺少 '+a.missing.join(', ')+'）'}</option>)}</select><span className="micro">{adapterError||'只切换「字段校验」的执行语言；其他节点保持不变。编译型语言首次运行会自动编译。'}</span></div>}
     <div className="workspace">
       <section className={`canvas ${isExpression||isSuite?'with-expression-calculator':''}`}>
         <div className="canvas-header"><strong>功能流程</strong><span>{isSuite?'点击节点编辑；在功能组内添加子节点':'点击节点查看需求、代码与测试；双击父功能折叠 / 展开'}</span><button onClick={()=>toggle(rootId)}>{collapsed.has(rootId)?'展开全部':'折叠功能'}</button></div>
+        <div className="importance-legend" aria-label="逻辑重要性图例"><span>逻辑重要性</span>{Object.entries(importanceLabels).map(([value,label])=><span className={`importance-badge importance-${value}`} key={value}>{label}</span>)}</div>
         <div className={`graph-sync ${graphConflict||!graphBase?'attention':''}`} role="status"><span>{graphStatus}</span><div><button onClick={refreshTraceability} disabled={!graphReady||graphBusy||traceLoading}>刷新状态</button><button onClick={()=>void loadProjectGraph()} disabled={!graphReady||graphBusy}>读取项目图</button>{graphCompatible&&(graphConflict||!graphBase)&&<button onClick={()=>void rebaseGraph()} disabled={graphBusy}>保留草稿并更新基线</button>}</div></div>
         <div className={`index-status ${traceability?.index?.state??'missing'}`} role="status"><span><b>需求索引</b> · {indexBusy?'正在构建…':traceability?.index?({current:'已构建 · 当前',stale:'源已变化 · 待重建',failed:'构建失败',missing:'尚未构建',unconfigured:'未配置构建工具'} as const)[traceability.index.state]:'正在读取'}{traceability?.index?.source==='local-marker'?' · 本地标记兼容视图':' · Sphinx-Needs / CodeLinks'}</span><button className="link-button" disabled={indexBusy||traceLoading||!traceability} onClick={()=>void buildIndex()}>重建索引</button></div>
         {traceability?.ubcode&&<div className="index-tool-note">ubCode：{traceability.ubcode.message}</div>}
         {(indexError||traceability?.index?.error)&&<div className="graph-message error" role="alert">{indexError||traceability?.index?.error}</div>}
         {capabilityError&&<div className="graph-message error" role="alert">运行能力暂不可用：{capabilityError}</div>}
+        {draftReadError&&<div className="graph-message error" role="alert">浏览器草稿读取被拒绝：{draftReadError}。原始草稿已保留，当前显示项目示例且暂停自动保存；“导出 JSON”可备份原稿，再读取项目图或导入修正版。</div>}
         {graphMessage&&<div className={`graph-message ${graphMessage.tone}`} role={graphMessage.tone==='error'?'alert':'status'}>{graphMessage.text}</div>}
         <ReactFlow nodes={flowNodes} edges={flowEdges} nodesDraggable={graphReady} nodesConnectable={graphReady} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} onNodeClick={(_,n)=>selectNode(n.id)} onNodeDoubleClick={(_,n)=>{if(graph.nodes.some(x=>x.parentId===n.id))toggleNode(n.id)}} onPaneClick={(event)=>{if(isSuite&&event.detail===2&&graphReady)addChild(rootId)}} fitView fitViewOptions={{padding:.06}} minZoom={.2} maxZoom={1.5} zoomOnScroll={!(isExpression||isSuite)} preventScrolling={!(isExpression||isSuite)} deleteKeyCode={null} defaultEdgeOptions={{type:'branch'}}>
           <Background gap={22} size={1} color="#e6ebf0"/><Controls position="bottom-left" showInteractive={false}/>
@@ -799,7 +805,7 @@ function Studio({example,onExampleChange}:{example:Example;onExampleChange:(exam
             <p className="description">{selected.description}</p>
             <div className="info-pair"><span>输入</span><b>{selected.input}</b></div><div className="info-pair"><span>输出</span><b>{selected.output}</b></div>
             <div className="tabs">{(['property','document','requirement','test','trace','code'] as const).map(t=><button key={t} className={tab===t?'active':''} onClick={()=>setTab(t)}>{t==='property'?'节点属性':t==='document'?'文档与任务':t==='requirement'?'需求关联':t==='test'?'运行与测试':t==='trace'?'日志':'实现映射'}</button>)}</div>
-            {tab==='property'&&<NodeProperties key={selected.id} node={selected} nodes={graph.nodes} capabilities={capabilities} onPatch={update} onSave={()=>void saveGraph()} saving={graphBusy} canSave={graphDirty&&!graphConflict&&graphCompatible&&!!graphBase&&!!selected.title.trim()} onRemove={selected.id===rootId?undefined:remove}/>}
+            {tab==='property'&&<NodeProperties key={selected.id} node={selected} nodes={graph.nodes} capabilities={capabilities} onPatch={update} onSave={()=>void saveGraph()} saving={graphBusy} canSave={!draftReadError&&graphDirty&&!graphConflict&&graphCompatible&&!!graphBase&&!!selected.title.trim()} onRemove={selected.id===rootId?undefined:remove}/>}
             {tab==='document'&&<div className="inspector-body"><p className="micro">{graphDirty?'文档包含尚未保存的浏览器草稿。':'文档由当前节点及关联需求生成。'}</p><div className="document-actions"><button className="primary-button" onClick={()=>exportNodeDocument()}>导出节点说明</button><button className="primary-button secondary" onClick={()=>exportNodeDocument(true)}>导出 Codex 开发任务</button></div><pre className="node-document">{nodeDocument}</pre></div>}
             {tab==='requirement'&&<>
               {compatible&&!traceLoading&&!traceError&&<div className="requirement-picker">

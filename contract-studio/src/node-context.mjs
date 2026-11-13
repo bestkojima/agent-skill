@@ -1,3 +1,5 @@
+import { importanceLabel, nodeImportance } from './node-importance.mjs';
+
 // A bounded view of the current graph, shared by the node document and Codex task.
 export function describeNodeContext(graph, nodeId) {
   const nodes = new Map(graph.nodes.map(node => [node.id, node]));
@@ -9,7 +11,8 @@ export function describeNodeContext(graph, nodeId) {
     `输入：${node.input || '待填写'}`,
     ...(node.inputSchema ? ['输入结构：', '```json', JSON.stringify(node.inputSchema, null, 2), '```'] : []),
     `输出：${node.output || '待填写'}`,
-    ...(node.outputSchema ? ['输出结构：', '```json', JSON.stringify(node.outputSchema, null, 2), '```'] : [])
+    ...(node.outputSchema ? ['输出结构：', '```json', JSON.stringify(node.outputSchema, null, 2), '```'] : []),
+    `重要性：${importanceLabel(node.importance)} (${nodeImportance(node.importance)})`
   ];
   const edgeLines = edge => [
     `连线：${edge.id}`,
@@ -27,6 +30,7 @@ export function describeNodeContext(graph, nodeId) {
   const incoming = graph.edges.filter(edge => edge.target === nodeId);
   const outgoing = graph.edges.filter(edge => edge.source === nodeId);
   const sections = [
+    `## 节点重要性\n${importanceLabel(selected.importance)} (${nodeImportance(selected.importance)})`,
     '## 图上依赖',
     `### 直接输入依赖\n${incoming.length ? incoming.map(edge => dependency(edge, edge.source)).join('\n\n') : '无直接输入连线。'}`,
     `### 直接输出依赖\n${outgoing.length ? outgoing.map(edge => dependency(edge, edge.target)).join('\n\n') : '无直接输出连线。'}`
