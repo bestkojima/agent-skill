@@ -5,6 +5,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { readNeedsIndex, buildNeedsIndex, indexConfigured } from './needs-index.mjs';
 import { nodeImportance } from '../src/node-importance.mjs';
 import { featureRegistry } from './feature-registry.mjs';
+import { backendRelations, backendNeedsText, nodeNeedId, acceptancePartId } from './backend-relations.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 function featureConfig(featureId) {
@@ -104,12 +105,14 @@ function rstText(data, graph, feature = featureConfig()) {
   const { requirementFile, graphFile } = feature;
   const esc = (s) => s.replaceAll('\\', '\\\\').replaceAll('*', '\\*').replaceAll('`', '\\`').replaceAll('|', '\\|').replaceAll('_', '\\_');
   // Hex-encoded UTF-8 is reversible and collision-free, including case and punctuation.
-  const functionId = (nodeId) => `FUNC_${feature.specPrefix??''}${Buffer.from(nodeId, 'utf8').toString('hex').toUpperCase()}`;
+  const functionId = nodeId => nodeNeedId(nodeId,feature);
   const lines = ['需求与功能图', '============', '', `.. 由 ${requirementFile} 和 ${graphFile} 生成；请修改源文件或使用工作台，不要直接编辑。`, '', '需求条目', '--------', ''];
   for (const r of (feature.requirementSources?.length ? data.requirements.filter(r => !r.sourceFeatureId) : data.requirements)) {
     lines.push(`.. req:: ${esc(r.title)}`, `   :id: ${r.id}`, `   :status: ${r.status}`, '', ...r.description.split('\n').map(line => `   ${esc(line)}`), '');
     if (acceptanceOf(r).length) {
-      lines.push('   验收条件::', '', `      ${JSON.stringify(acceptanceOf(r))}`, '');
+      lines.push('   验收条件：', '');
+      for(const item of acceptanceOf(r))lines.push(`   * :need_part:\`(${acceptancePartId(item.id)}) ${esc(`输入 ${item.input}；预期 ${item.expected}${item.observable?'；观察 '+item.observable:''}`).replaceAll('\n',' ')}\``);
+      lines.push('');
     }
   }
   lines.push('项目功能图', '----------', '', `仅包含 ${graphFile} 已持久的图；浏览器画布草稿不会自动写入此文件。`, '', '.. 持久图完整快照，仅用于过期检测；来源仍以 JSON 文件为准。', `   ${JSON.stringify(graph)}`, '');
@@ -161,12 +164,38 @@ async function exportBuildSources(root, featureId) {
   }
 }
 
+async function backendModels(root) {
+  const models=[];
+  for(const feature of featureRegistry.features) {
+    try { await fs.access(path.join(root,feature.requirementFile));await fs.access(path.join(root,feature.graphFile)); }
+    catch(error) { if(error.code==='ENOENT')continue;throw error; }
+    const data=await combinedRequirements(root,feature);
+    const graph=await loadGraph(root,data.featureId,feature);
+    models.push(backendRelations(graph,data.requirements,{feature}));
+  }
+  return models;
+}
+
+async function exportBackendNeeds(root) {
+  const text=backendNeedsText(await backendModels(root));
+  const target=path.join(root,'traceability/backend.rst');
+  try { if(await fs.readFile(target,'utf8')===text)return; }
+  catch(error) { if(error.code!=='ENOENT')throw error; }
+  await fs.mkdir(path.dirname(target),{recursive:true});
+  await fs.writeFile(target,text,'utf8');
+}
+
+async function refreshIndex(root,options) {
+  await exportBackendNeeds(root);
+  return buildNeedsIndex(root,options);
+}
+
 // The index build is explicit for legacy consumers. Configured workbenches also
 // invoke it after saves; failures are returned as index state, never a source rollback.
 export async function buildTraceabilityIndex(root = projectRoot, featureId, options) {
   return serialized(async()=>{
     await exportBuildSources(root,featureId);
-    await buildNeedsIndex(root, options);
+    await refreshIndex(root, options);
     return traceability(root, featureId);
   });
 }
@@ -186,7 +215,7 @@ export async function traceability(root = projectRoot, featureId) {
   const data = await combinedRequirements(root, feature);
   if (featureId !== undefined && data.featureId !== featureId) throw new TraceError('需求文件的功能 ID 不匹配');
   const graph = await loadGraph(root, data.featureId, feature);
-  const {index, needs, refs} = await readNeedsIndex(root);
+  const {index, needs, refs, entities=[]} = await readNeedsIndex(root);
   let sphinxState = 'missing';
   try { sphinxState = (await fs.readFile(path.join(root, feature.rstFile), 'utf8')) === rstText(data, graph, feature) ? 'current' : 'outdated'; }
   catch (e) { if (e.code !== 'ENOENT') throw e; }
@@ -203,8 +232,9 @@ export async function traceability(root = projectRoot, featureId) {
   if(index.state==='current'&&!indexSourcesCurrent) {
     index.state='stale';index.message='需求源与 RST 未同步，索引尚未包含当前源内容。';
   }
+  const backend=backendRelations(graph,data.requirements,{feature,entities:entities.map(entity=>({...entity,indexState:index.state}))});
   const relations = Object.values(needs).filter(need => need.type === 'spec').map(need => ({id:need.id,title:need.title,importance:nodeImportance(need.importance),fulfills:need.fulfills??[],contains:need.contains??[],flowsTo:need.flows_to??[]}));
-  return { featureId: data.featureId, source: feature.requirementFile, projectGraph: graph, sphinx: { path: feature.rstFile, state: sphinxState }, index, relations,
+  return { featureId: data.featureId, source: feature.requirementFile, projectGraph: graph, sphinx: { path: feature.rstFile, state: sphinxState }, index, relations, backend,
     ubcode: {state:'not-connected',message:'未接入（可选）'},
     requirements: data.requirements.map(r => ({ ...r,
       ...(index.state === 'current' && needs[r.id] ? {title:needs[r.id].title,description:r.description,status:needs[r.id].status} : {}),
@@ -243,7 +273,7 @@ export function updateRequirement(body, root = projectRoot) {
       if (data.requirements.some(r => r.id === body.id)) throw new TraceError('需求 ID 已存在', 409);
       data.requirements.push({id: body.id, nodeId: linked[0], ...(nodeIds?{nodeIds}:{}), title: body.title.trim(), description: body.description.trim().replaceAll('\r\n', '\n'), status: 'draft', revision: 1,...(acceptance?{acceptance,acceptanceStatus:'draft'}:{})});
       await persist(root, data, feature);
-      if (await indexConfigured(root)) await buildNeedsIndex(root);
+      if (await indexConfigured(root)) await refreshIndex(root);
       return traceability(root, featureId);
     }
     const item = data.requirements.find(r => r.id === body.id);
@@ -280,7 +310,7 @@ export function updateRequirement(body, root = projectRoot) {
       await persist(root, data, feature);
     }
     if (isCombined && owner) await exportNeeds(root, body.featureId);
-    if (await indexConfigured(root)) await buildNeedsIndex(root);
+    if (await indexConfigured(root)) await refreshIndex(root);
     return traceability(root, isCombined ? body.featureId : featureId);
   });
 }
@@ -299,7 +329,7 @@ export function updateGraph(body, root = projectRoot) {
     await fs.writeFile(temp, JSON.stringify(graph, null, 2) + '\n', 'utf8');
     await fs.rename(temp, target);
     await exportNeeds(root, data.featureId);
-    if (await indexConfigured(root)) await buildNeedsIndex(root);
+    if (await indexConfigured(root)) await refreshIndex(root);
     return traceability(root, data.featureId);
   });
 }

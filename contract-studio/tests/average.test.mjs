@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { runAverage, testAverageNode, validateAverageInput } from '../server/average.mjs';
 import { runSum, validateSumInput, accumulateSum } from '../server/sum.mjs';
 
-// @need-ids: REQ_AVERAGE_ALL, REQ_AVERAGE_ACCUMULATE, REQ_AVERAGE_COMPUTE
+// @need-ids: TEST_AVG_20, REQ_AVERAGE_ALL, REQ_AVERAGE_ACCUMULATE, REQ_AVERAGE_COMPUTE
 test('平均值：1 至 20 返回总和 210、数量 20、均值 10.5 和真实 21 步', async () => {
   const values = Array.from({ length: 20 }, (_, i) => i + 1);
   const run = await runAverage({ values });
@@ -27,7 +27,7 @@ test('平均值：1 至 20 返回总和 210、数量 20、均值 10.5 和真实 
   assert.equal(run.ui.message, '平均值：10.5');
 });
 
-// @need-ids: REQ_AVERAGE_VALIDATE, REQ_AVERAGE_COMPUTE
+// @need-ids: TEST_AVG_VALUES, REQ_AVERAGE_ALL, REQ_AVERAGE_VALIDATE, REQ_AVERAGE_COMPUTE
 test('平均值支持单个数字、负数、小数、零和科学计数法', async () => {
   for (const [values, expected] of [
     [[1, 2, 3], 2], [[7], 7], [[-2, 0, 5], 1], [[0.5, 1.5], 1],
@@ -38,18 +38,20 @@ test('平均值支持单个数字、负数、小数、零和科学计数法', as
     const run = await runAverage(input);
     assert.equal(run.result.value, expected);
     assert.equal(run.result.count, values.length);
+    assert.equal(run.result.total, expected * values.length);
     assert.equal(run.result.steps.length, values.length + 1);
     assert.deepEqual(input, original);
   }
   assert.deepEqual(validateAverageInput({ values: ['7'] }), { status: 'valid', input: { values: [7] } });
 });
 
-// @need-ids: REQ_AVERAGE_VALIDATE
+// @need-ids: TEST_AVG_INVALID, REQ_AVERAGE_VALIDATE
 test('平均值拒绝空输入、空项、非法值与非有限值，不丢弃任何输入项', async () => {
   for (const raw of [undefined, null, {}, { values: [] }, { values: '1,2' }]) {
     const run = await runAverage(raw);
     assert.equal(run.status, 'rejected');
     assert.equal(run.result.code, 'EMPTY_INPUT');
+    assert.equal('value' in run.result, false);
     assert.equal(run.ui.message, '请至少输入 1 个数字。');
     assert.deepEqual(run.trace.map(item => item.nodeId), ['avg-validate']);
   }
@@ -66,9 +68,9 @@ test('平均值拒绝空输入、空项、非法值与非有限值，不丢弃�
   }
 });
 
-// @need-ids: REQ_AVERAGE_ACCUMULATE, REQ_AVERAGE_COMPUTE
+// @need-ids: TEST_AVG_OVERFLOW, REQ_AVERAGE_ACCUMULATE, REQ_AVERAGE_COMPUTE
 test('平均值累加溢出保留已发生的步骤，跳过除法且不返回成功数值', async () => {
-  const run = await runAverage({ values: [1e308, 1e308, 1] });
+  const run = await runAverage({ values: [1e308, 1e308] });
   assert.equal(run.status, 'rejected');
   assert.equal(run.result.code, 'NUMERIC_OVERFLOW');
   assert.match(run.result.message, /累加第 2 项后结果超出/);

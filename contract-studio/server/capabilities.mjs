@@ -38,7 +38,7 @@ async function filesUnder(root, dir) {
 
 // Metadata tracks the actual candidate without storing source code or hashing files.
 async function candidate(root, cap) {
-  const relevant = new Set([...cap.testFiles,'server/api.mjs','server/capabilities.mjs',
+  const relevant = new Set([...cap.testFiles,'server/api.mjs','server/capabilities.mjs','scripts/test-case-reporter.mjs',
     ...await filesUnder(root,'src'), ...await filesUnder(root,'features'), ...cap.implementation.map(ref=>ref.path),
     ...await filesUnder(root,'server').then(files=>files.filter(file=>!file.startsWith('server/adapters/')))]);
   const files = [];
@@ -62,20 +62,37 @@ async function candidate(root, cap) {
 }
 const reportPath = (root,id) => path.join(root,'traceability','_build','test-results',`${id}.json`);
 function publicReport(report) { const {candidate: _candidate,...result}=report; return result; }
+function caseResults(cap, root, events=[]) {
+  return (cap.testCases??[]).map(declaration=>{
+    const matches=events.filter(event=>event.name===declaration.name && event.file &&
+      path.resolve(root,event.file)===path.resolve(root,declaration.file));
+    const {name:_name,file:_file,...outcome}=matches.length===1 ? matches[0] : {
+      state:'not-run',message:matches.length ? '同文件存在同名用例，无法唯一关联结果' : '本次运行未匹配到该用例',
+    };
+    return {...structuredClone(declaration),...outcome};
+  });
+}
+function staleCases(cases) {
+  return cases.map(item=>item.state==='not-run' || item.state==='stale' ? item :
+    {...item,state:'stale',observedState:item.state});
+}
 export async function capabilityEvidence(id, root=projectRoot) {
   const cap=capability(id);
   let report;
   try { report=JSON.parse(await fs.readFile(reportPath(root,id),'utf8')); }
-  catch (error) { if (error.code==='ENOENT') return {capabilityId:id,state:'not-run',message:'尚未运行关联测试'}; throw error; }
+  catch (error) { if (error.code==='ENOENT') return {capabilityId:id,state:'not-run',cases:caseResults(cap,root),message:'尚未运行关联测试'}; throw error; }
+  report.cases??=caseResults(cap,root);
   if (!isDeepStrictEqual(report.candidate,await candidate(root,cap))) {
-    return {...publicReport(report),state:'stale',message:'相关代码或行为契约已变化，请重新运行测试'};
+    return {...publicReport(report),state:'stale',cases:staleCases(report.cases),message:'相关代码或行为契约已变化，请重新运行测试'};
   }
   return publicReport(report);
 }
 
-function executeTests(root, testFiles) {
+function executeTests(root, testFiles, eventFile) {
   return new Promise(resolve=>{
-    const args=['--test','--test-reporter=tap',...testFiles];
+    const args=['--test','--test-reporter=tap',
+      ...(eventFile ? [`--test-reporter=${new URL('../scripts/test-case-reporter.mjs',import.meta.url).href}`,
+        '--test-reporter-destination=stdout',`--test-reporter-destination=${eventFile}`] : []),...testFiles];
     const env={...process.env};
     // A caller may itself be a node:test process; this is a separate test run.
     delete env.NODE_TEST_CONTEXT;
@@ -96,15 +113,25 @@ export async function runCapabilityTests(id, root=projectRoot) {
   const job=(async()=>{
     const before=await candidate(root,cap);
     const startedAt=new Date().toISOString(), start=performance.now();
-    const result=await executeTests(root,cap.testFiles);
+    const file=reportPath(root,id);
+    await fs.mkdir(path.dirname(file),{recursive:true});
+    const eventFile=cap.testCases?.length ? file.replace(/\.json$/,'.events.jsonl') : undefined;
+    if (eventFile) await fs.writeFile(eventFile,'');
+    const result=await executeTests(root,cap.testFiles,eventFile);
+    let events=[];
+    if (eventFile) {
+      try { events=(await fs.readFile(eventFile,'utf8')).split(/\r?\n/).filter(Boolean).map(line=>JSON.parse(line)); }
+      catch (error) { result.message=[result.message,`逐用例报告读取失败：${error.message}`].filter(Boolean).join('；'); }
+    }
     const changed=!isDeepStrictEqual(before,await candidate(root,cap));
     const passed=Number(result.output.match(/^# pass (\d+)\s*$/m)?.[1]??0);
     const failed=Number(result.output.match(/^# fail (\d+)\s*$/m)?.[1]??0);
+    const cases=caseResults(cap,root,events);
     const report={capabilityId:id,state:changed?'stale':result.exitCode===0&&passed>0&&failed===0?'passed':'failed',
+      cases:changed ? staleCases(cases) : cases,
       passed,failed,exitCode:result.exitCode,startedAt,completedAt:new Date().toISOString(),durationMs:Math.round(performance.now()-start),
       command:['node',...result.args],output:result.output,candidate:before,
       message:changed?'运行期间相关代码或契约发生变化，请重新测试':result.message||undefined};
-    const file=reportPath(root,id);await fs.mkdir(path.dirname(file),{recursive:true});
     await fs.writeFile(file,JSON.stringify(report,null,2)+'\n');
     return publicReport(report);
   })();

@@ -48,21 +48,25 @@ export async function runAverage(raw, mode = 'dry-run') {
   const trace = [];
   async function step(nodeId, input, fn) {
     const start = performance.now();
-    const output = await fn();
+    const output = await fn(input);
     trace.push({ nodeId, input, output, status: output.status === 'invalid' ? 'rejected' : 'ok',
+      function:{path:'server/average.mjs',symbol:fn.name},
       elapsedMs: Math.round(performance.now() - start) });
     return output;
   }
-  const validated = await step('avg-validate', raw, () => validateAverageInput(raw));
+  const validated = await step('avg-validate', raw, validateAverageInput);
   let result = validated;
   if (validated.status === 'valid') {
-    const accumulated = await step('avg-accumulate', validated.input, () => accumulateAverage(validated.input));
+    const accumulated = await step('avg-accumulate', validated.input, accumulateAverage);
     result = accumulated.status === 'success'
-      ? await step('avg-compute', accumulated, () => computeAverage(accumulated))
+      ? await step('avg-compute', accumulated, computeAverage)
       : accumulated;
   }
-  return { mode, status: result.status === 'success' ? 'completed' : 'rejected', result,
-    ui: averageUi(result), trace };
+  const ui=averageUi(result);
+  const observedCalls=[...trace.map(entry=>({nodeId:entry.nodeId,callee:entry.function})),
+    {nodeId:'average',callee:{path:'server/average.mjs',symbol:'averageUi'}}]
+    .map(call=>({...call,caller:{path:'server/average.mjs',symbol:'runAverage'},source:'runtime'}));
+  return { mode, status: result.status === 'success' ? 'completed' : 'rejected', result,ui,trace,observedCalls };
 }
 
 // @need-ids: REQ_AVERAGE_ALL

@@ -614,17 +614,97 @@
       },
       "outputSchema": {
         "type": "object",
+        "required": [
+          "mode",
+          "status",
+          "result",
+          "ui",
+          "trace",
+          "observedCalls"
+        ],
         "properties": {
-          "count": {
-            "type": "integer"
+          "mode": {
+            "enum": [
+              "dry-run",
+              "sandbox"
+            ]
           },
-          "total": {
-            "type": "number"
+          "status": {
+            "enum": [
+              "completed",
+              "rejected"
+            ]
           },
-          "value": {
-            "type": "number"
+          "result": {
+            "oneOf": [
+              {
+                "type": "object",
+                "required": [
+                  "status",
+                  "value",
+                  "count",
+                  "total",
+                  "steps"
+                ],
+                "properties": {
+                  "status": {
+                    "const": "success"
+                  },
+                  "count": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "total": {
+                    "type": "number"
+                  },
+                  "steps": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    }
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "number"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": [
+                  "status",
+                  "code",
+                  "message"
+                ],
+                "properties": {
+                  "status": {
+                    "const": "invalid"
+                  },
+                  "code": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "steps": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            ]
           },
-          "steps": {
+          "ui": {
+            "type": "object"
+          },
+          "trace": {
+            "type": "array"
+          },
+          "observedCalls": {
             "type": "array"
           }
         }
@@ -632,8 +712,8 @@
       "importance": "core"
     },
     {
-      "input": "一个或多个有限数字",
-      "output": "有效数字列表 / 带位置的错误",
+      "input": "原始 values 列表（数字或数字字符串，至少一项）",
+      "output": "status=valid 与 input.values / status=invalid 与 code、message",
       "errors": [
         "EMPTY_INPUT",
         "INVALID_NUMBER"
@@ -675,11 +755,85 @@
       },
       "processing": "保留输入顺序与项位置；允许负数、小数、零和科学计数。",
       "code": "server/average.mjs#validateAverageInput",
-      "importance": "key"
+      "importance": "key",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "values"
+        ],
+        "properties": {
+          "values": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": [
+                "number",
+                "string"
+              ]
+            }
+          }
+        }
+      },
+      "outputSchema": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "status",
+              "input"
+            ],
+            "properties": {
+              "status": {
+                "const": "valid"
+              },
+              "input": {
+                "type": "object",
+                "required": [
+                  "values"
+                ],
+                "properties": {
+                  "values": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "number"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "status",
+              "code",
+              "message"
+            ],
+            "properties": {
+              "status": {
+                "const": "invalid"
+              },
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        ]
+      }
     },
     {
-      "input": "一个或多个有限数字",
-      "output": "总和、数量、实际累加步骤 / 错误",
+      "input": "校验后的 input.values（非空有限数字列表）",
+      "output": "status、count、total、steps / 错误与已完成步骤",
       "errors": [
         "NUMERIC_OVERFLOW"
       ],
@@ -720,11 +874,85 @@
       },
       "processing": "从零开始累加；中间结果溢出则保留已经完成的步骤并停止。",
       "code": "server/average.mjs#accumulateAverage",
-      "importance": "key"
+      "importance": "key",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "values"
+        ],
+        "properties": {
+          "values": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "number"
+            }
+          }
+        }
+      },
+      "outputSchema": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "status",
+              "count",
+              "total",
+              "steps"
+            ],
+            "properties": {
+              "status": {
+                "const": "success"
+              },
+              "count": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "total": {
+                "type": "number"
+              },
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "status",
+              "code",
+              "message"
+            ],
+            "properties": {
+              "status": {
+                "const": "invalid"
+              },
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        ]
+      }
     },
     {
-      "input": "一个或多个有限数字",
-      "output": "数量、总和、平均值与步骤 / 错误",
+      "input": "累加结果 count、total、steps（count 为正整数）",
+      "output": "status、value、count、total、steps / 错误与已完成步骤",
       "errors": [
         "NUMERIC_OVERFLOW"
       ],
@@ -765,7 +993,93 @@
       },
       "processing": "总和 ÷ 数量，使用 JavaScript 浮点数语义。",
       "code": "server/average.mjs#computeAverage",
-      "importance": "core"
+      "importance": "core",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "count",
+          "total",
+          "steps"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "total": {
+            "type": "number"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      "outputSchema": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "status",
+              "value",
+              "count",
+              "total",
+              "steps"
+            ],
+            "properties": {
+              "status": {
+                "const": "success"
+              },
+              "count": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "total": {
+                "type": "number"
+              },
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "message": {
+                "type": "string"
+              },
+              "value": {
+                "type": "number"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "status",
+              "code",
+              "message"
+            ],
+            "properties": {
+              "status": {
+                "const": "invalid"
+              },
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        ]
+      }
     }
   ],
   "edges": [

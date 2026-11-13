@@ -12,6 +12,8 @@ export function createFeatureRegistry(bundles) {
   const capabilities=bundles.flatMap(bundle=>bundle.capabilities??[]);
   const routes=bundles.flatMap(bundle=>bundle.routes??[]);
   const code=bundles.flatMap(bundle=>bundle.code??[]);
+  const calls=bundles.flatMap(bundle=>bundle.calls??[]);
+  const trials=bundles.flatMap(bundle=>bundle.trials??[]);
   const unique=(items,key,label)=>{
     const seen=new Set();
     for(const item of items){const value=key(item);if(!value||seen.has(value))throw Error(`Duplicate or missing ${label}: ${value}`);seen.add(value);}
@@ -26,6 +28,13 @@ export function createFeatureRegistry(bundles) {
   }
   return {
     features,capabilities,resolveFeature,
+    calls,trials,
+    implementationFor(node,capability){
+      if(!capability)return [];
+      const id=capability.nodeIds?.includes(node.id)?node.id:capability.rootNodeId;
+      const ref=code.find(item=>item.nodeId===id);
+      return ref ? (ref.functions??[{path:ref.file,symbol:ref.symbol}]) : [];
+    },
     defaultFeature:features.find(feature=>feature.defaultUi)??features[0],
     defaultTrace:features.find(feature=>feature.defaultTrace)??features[0],
     route:(method,url)=>routes.find(route=>route.method===method&&route.path===url),

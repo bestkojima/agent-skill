@@ -15,7 +15,7 @@
 | 发现功能 | `GET /api/features`；返回已登记功能、图、前端入口及运行能力 |
 | 读取节点上下文 | `GET /api/node-context?feature=<别名或功能ID>&nodeId=<节点ID>`；返回结构化 `context`、节点说明 `markdown` 和开发任务 `taskMarkdown` |
 | 预览画布草稿 | `POST /api/node-context/preview` 携带 `featureId`、`graph`、`nodeId`；使用当前画布和已保存需求，只读生成与侧栏相同的上下文 |
-| 读取完整图与关联 | `GET /api/traceability?feature=<已登记功能>`；返回持久图、需求、代码／测试引用与索引状态 |
+| 读取完整图与关联 | `GET /api/traceability?feature=<已登记功能>`；返回持久图、需求、代码／测试引用、`backend` 关系及索引状态 |
 | 保存契约 | `POST /api/traceability/graph` 携带 `featureId`、`graph`、`expectedGraph`；需求用 `/api/traceability/requirement`，修改已有需求携带 `revision`。载荷见 `server/api.mjs`、`server/traceability.mjs` |
 | 接入实现 | 在 `features/<功能>/server.mjs` 声明来源、可信路由、能力与代码绑定，并由 `server/feature-registry.mjs` 登记；对应 `client.tsx` 提供前端操作，再设置节点 `capabilityId` |
 | 更新索引 | `node scripts/build-index.mjs` 或 `POST /api/traceability/build`；源码与测试使用 `@need-ids:` 标记 |
@@ -124,11 +124,57 @@ npm run dev -- --host 127.0.0.1
 node scripts/build-index.mjs
 ```
 
-该命令同步已登记的需求／功能图对应的 RST，再实际构建。指定 `calculator.suite` 时，同步统一计算器及其两数、求和、混合运算来源。产物位于 `traceability/_build/needs/needs.json`，不纳入 Git。导出中 `req` 表示需求，`spec` 表示功能规格；`fulfills` 连接需求，`contains` 表示包含，`flows_to` 表示后继。边端口和分支标签仍保留在节点内容中。
+该命令同步已登记的需求／功能图对应的 RST 和后端关系视图，再实际构建。指定 `calculator.suite` 时，同步统一计算器及其两数、求和、混合运算来源。产物 `traceability/_build/needs/needs.json` 保存需求关系，旁边的 `code-entities.json` 保存 CodeLinks 函数签名和范围，均不纳入 Git。
 
 统一计算器新增需求（包括平均值）写入 `contracts/calculator-suite.requirements.json`。原两数、求和、混合运算需求继续归属各自的需求文件，统一视图聚合读取；反馈工单继续使用 `contracts/requirements.json`。原确认记录和修订信息随源文件保留。
 
 Sphinx-Needs 解析结构化条目和关系，CodeLinks 读取源码标记。当前 Java、PHP 引用使用明确标注的 `local-marker` 兼容扫描，其余受配置支持的引用标注 `sphinx-codelinks`。源码标记只能说明关联位置，实际行为要看运行与测试。
+
+### Sphinx-Needs 与 CodeLinks 用法
+
+Agent 修改 JSON 源和可信功能登记，框架生成 `req`（需求）、`spec`（节点）、`impl`（具体函数）、`test`（具名测试）。关系为 `spec.fulfills → req`、`impl.implements → spec`、`test.verifies → 需求验收项`；`contains` 表示包含，`flows_to` 保留业务数据流，`impl.calls` 来自登记的调用声明。
+
+接入一个节点时：
+
+1. 在 `features/<功能>/server.mjs` 的 `code` 中登记 `{nodeId, file, symbol}`；多个直接函数用 `functions: [{path, symbol}, …]`，保留 `file/symbol` 作为主源码预览入口。
+2. 在实际实现函数前写 `// @need-ids: REQ_AVERAGE_COMPUTE`。在实际测试前写 `// @need-ids: TEST_AVG_20`，并将用例加入能力的 `testCases`；`file` 和 `name` 必须与测试文件和真实名称一致。例如现有用例的登记为：
+
+   ```js
+   {
+     id: 'TEST_AVG_20',
+     name: '平均值：1 至 20 返回总和 210、数量 20、均值 10.5 和真实 21 步',
+     file: 'tests/average.test.mjs',
+     verifies: [
+       {requirementId: 'REQ_AVERAGE_ALL', acceptanceId: 'AVG_20'},
+       {requirementId: 'REQ_AVERAGE_COMPUTE', acceptanceId: 'AVG_DIVIDE'},
+     ],
+   }
+   ```
+
+3. 执行 `node scripts/build-index.mjs`；按本次任务授权运行登记测试，再读取节点上下文。Sphinx 关系配置在 `traceability/ubproject.toml`，新增源码目录也在这里配置 CodeLinks 项目，并在 `traceability/index.rst` 增加 `src-trace`。
+
+验收条件导出为 Sphinx-Needs 的 `need_part`，测试可精确引用到一条条件。以下是上述关联的派生格式节选；直接编辑源 JSON，保留 RST 为生成文件：
+
+```rst
+.. req:: 用总和除以数量计算均值
+   :id: REQ_AVERAGE_COMPUTE
+
+   * :need_part:`(AVG_DIVIDE) 输入总和 210、数量 20；预期均值 10.5。`
+
+.. test:: 平均值：1 至 20 返回总和 210、数量 20、均值 10.5 和真实 21 步
+   :id: TEST_AVG_20
+   :verifies: REQ_AVERAGE_ALL.AVG_20, REQ_AVERAGE_COMPUTE.AVG_DIVIDE
+```
+
+普通验收 ID 原样成为 part ID；含点或以 `PART_` 开头的既有 ID 使用可逆编码，查询时以返回的 `needId` 为准。完整函数／测试条目集中在派生文件 `traceability/backend.rst`。格式依据：[Sphinx-Needs 验收子条目](https://sphinx-needs.readthedocs.io/en/latest/roles.html#need-part-np)、[CodeLinks 源码分析](https://codelinks.useblocks.com/en/sphinx-codelinks-v2.1.0/components/analyse.html)。
+
+查询 `GET /api/node-context?feature=suite&nodeId=avg-compute` 可取得：
+
+- `context.implementation`：该节点的直接函数；`relatedImplementation` 为同一能力的其他节点函数。
+- `context.backend`：节点、需求、函数、数据流、声明调用和验收用例的连接。函数身份采用文件＋符号，`signature/startLine/endLine` 来自 CodeLinks；`scopeState: current` 才能作为当前源码定位。
+- `context.backend.testCases`：逐用例的 `passed/failed/skipped/not-run/stale` 和 `verifies`。测试到函数的 `requirement-binding` 表示需求关联；执行覆盖率需要另外采集。
+
+内部节点契约与试运行适配器分开：`avg-compute` 接收 `{count, total, steps}`；原 `/api/average/test` 继续接收 `{values}`，由适配器准备前置步骤，输入说明在 `context.backend.trial`。平均值执行结果的 `observedCalls` 记录本次实际调用的步骤函数与结果呈现函数；它与声明调用、图上数据流分别读取。
 
 ### ubCode 的位置
 
@@ -183,6 +229,7 @@ npm run test:adapters  # 多语言一致性与 HTTP 测试
 | 节点／需求保存与追踪视图 | `server/traceability.mjs` |
 | Sphinx 构建、索引读取和引用规范化 | `server/needs-index.mjs`、`scripts/build-index.mjs` |
 | 功能来源、可信路由与能力登记 | `server/feature-registry.mjs`、`features/*/server.mjs` |
+| 需求、节点、函数及验收用例连接 | `server/backend-relations.mjs`；函数／测试派生视图为 `traceability/backend.rst` |
 | 实际测试报告与有效性 | `server/capabilities.mjs` |
 | 平均值与共享数字逻辑 | `server/average.mjs`、`server/numeric-values.mjs` |
 | 原计算能力 | `server/calculator.mjs`、`server/sum.mjs`、`server/expression.mjs` |

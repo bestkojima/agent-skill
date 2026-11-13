@@ -8,6 +8,7 @@ const ownRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const indexPath = 'traceability/_build/needs/needs.json';
 const statePath = 'traceability/_build/needs/index-state.json';
 const projectsPath = 'traceability/_build/needs/source-projects.json';
+const entitiesPath = 'traceability/_build/needs/code-entities.json';
 const sourceExtensions = new Set(['.mjs','.js','.ts','.tsx','.cpp','.py','.go','.java','.php','.cs','.rs']);
 const buildJobs = new Map();
 const exists = async file => { try { return (await fs.stat(file)).isFile(); } catch (e) { if(e.code==='ENOENT')return false; throw e; } };
@@ -28,7 +29,7 @@ export async function sourceRevision(root) {
     }
   }
   for(const dir of ['contracts','src','server','features','tests','traceability'])await walk(dir);
-  for(const file of ['pyproject.toml','uv.lock'])if(await exists(path.join(root,file))){const stat=await fs.stat(path.join(root,file));files[file]={size:stat.size,mtimeMs:stat.mtimeMs};}
+  for(const file of ['pyproject.toml','uv.lock','scripts/build-needs.py'])if(await exists(path.join(root,file))){const stat=await fs.stat(path.join(root,file));files[file]={size:stat.size,mtimeMs:stat.mtimeMs};}
   return files;
 }
 
@@ -73,13 +74,14 @@ export async function normalizeCodeUrl(root, url, aliases = {}) {
 }
 
 export async function readNeedsIndex(root) {
-  if(!await indexConfigured(root))return {index:{state:'unconfigured',source:'local-marker',path:null,message:'此项目未配置 Sphinx；使用原有本地标记索引。'},needs:{},refs:await localMarkerReferences(root)};
+  if(!await indexConfigured(root))return {index:{state:'unconfigured',source:'local-marker',path:null,message:'此项目未配置 Sphinx；使用原有本地标记索引。'},needs:{},refs:await localMarkerReferences(root),entities:[]};
   const revision=await sourceRevision(root);
-  let saved,artifact,aliases;
-  try{[saved,artifact,aliases]=await Promise.all([jsonAt(root,statePath),jsonAt(root,indexPath),jsonAt(root,projectsPath)]);}catch(e){return {index:{state:'failed',source:'sphinx-needs+codelinks',path:indexPath,error:`索引文件无法读取：${e.message}`,sourceRevision:revision},needs:{},refs:new Map()};}
+  let saved,artifact,aliases,entityArtifact;
+  try{[saved,artifact,aliases,entityArtifact]=await Promise.all([jsonAt(root,statePath),jsonAt(root,indexPath),jsonAt(root,projectsPath),jsonAt(root,entitiesPath)]);}catch(e){return {index:{state:'failed',source:'sphinx-needs+codelinks',path:indexPath,error:`索引文件无法读取：${e.message}`,sourceRevision:revision},needs:{},refs:new Map(),entities:[]};}
   const state=saved?.state==='failed'?'failed':!artifact?'missing':saved?.sourceRevision&&isDeepStrictEqual(saved.sourceRevision,revision)?'current':'stale';
   const index={state,source:'sphinx-needs+codelinks',path:indexPath,builtAt:saved?.builtAt??artifact?.created??null,error:saved?.state==='failed'?saved.error:undefined,sourceRevision:saved?.sourceRevision??null};
   const needs=artifact?.versions?.[artifact.current_version]?.needs??{};
+  const entities=(entityArtifact?.schemaVersion===1&&Array.isArray(entityArtifact.entities)?entityArtifact.entities:[]).map(entity=>({...entity,indexState:state}));
   const refs=new Map();
   for(const [id,need] of Object.entries(needs)){
     const references=[];
@@ -89,7 +91,11 @@ export async function readNeedsIndex(root) {
         const line=(await fs.readFile(path.join(root,ref.path),'utf8')).split(/\r?\n/)[ref.line-1];
         const marker=line.match(/^\s*(?:\/\/|#)\s*@need-ids:\s*([A-Za-z0-9_,\s-]+)$/);
         // A stale line must never open an unrelated function after source edits.
-        if(marker?.[1].split(',').map(value=>value.trim()).includes(id))references.push({...ref,indexState:state});
+        if(marker?.[1].split(',').map(value=>value.trim()).includes(id)){
+          const entity=state==='current'?entities.find(item=>item.path===ref.path&&item.markerLines.includes(ref.line)&&item.needIds.includes(id)):null;
+          const scope=entity?Object.fromEntries(['symbol','signature','startLine','endLine','kind','language'].map(key=>[key,entity[key]])):null;
+          references.push({...ref,indexState:state,...(scope?{scope}:{})});
+        }
       }
     }
     refs.set(id,references);
@@ -97,7 +103,7 @@ export async function readNeedsIndex(root) {
   // These two languages are explicitly outside the current CodeLinks configuration.
   const compatibility=await localMarkerReferences(root,new Set(['.java','.php']));
   for(const [id,items] of compatibility){if(!refs.has(id))refs.set(id,[]);refs.get(id).push(...items.map(ref=>({...ref,source:'local-marker',indexState:'current'})));}
-  return {index,needs,refs};
+  return {index,needs,refs,entities};
 }
 
 function execute(python,args,root) {
@@ -120,7 +126,9 @@ export async function buildNeedsIndex(root, {python,runner=execute} = {}) {
       const artifact=JSON.parse(await fs.readFile(path.join(candidate,'needs.json'),'utf8'));
       if(!artifact.versions?.[artifact.current_version]?.needs)throw Error('Sphinx 未生成有效 needs.json');
       const aliases=JSON.parse(await fs.readFile(path.join(candidate,'source-projects.json'),'utf8'));
-      await writeJson(root,indexPath,artifact);await writeJson(root,projectsPath,aliases);
+      const entities=JSON.parse(await fs.readFile(path.join(candidate,'code-entities.json'),'utf8'));
+      if(entities.schemaVersion!==1||!Array.isArray(entities.entities))throw Error('CodeLinks 未生成有效 code-entities.json');
+      await writeJson(root,indexPath,artifact);await writeJson(root,projectsPath,aliases);await writeJson(root,entitiesPath,entities);
       const state={state:'current',builtAt:new Date().toISOString(),sourceRevision:revision,creator:artifact.versions[artifact.current_version].creator};
       await writeJson(root,statePath,state);
     }catch(error){await writeJson(root,statePath,{...previous,state:'failed',attemptedAt:new Date().toISOString(),error:error.message});}

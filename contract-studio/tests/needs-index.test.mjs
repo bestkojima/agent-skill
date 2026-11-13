@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { readNeedsIndex, buildNeedsIndex, normalizeCodeUrl } from '../server/needs-index.mjs';
+import { readNeedsIndex, buildNeedsIndex, normalizeCodeUrl, sourceRevision } from '../server/needs-index.mjs';
 import { traceability, exportNeeds, updateRequirement, sourceAt, buildTraceabilityIndex } from '../server/traceability.mjs';
 
 const project=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
@@ -18,19 +18,20 @@ async function fixture(t,{configured=false}={}) {
   await fs.writeFile(path.join(root,'contracts/feedback.json'),JSON.stringify({version:2,feature:{id:'demo',title:'示例',goal:'验证'},nodes:[{id:'one',title:'功能一',input:'In',output:'Out',parentId:null,position:{x:0,y:0}},{id:'two',title:'功能二',input:'In',output:'Out',parentId:'one',position:{x:10,y:0}}],edges:[{id:'e',source:'one',target:'two',sourceHandle:'ok',label:'有效'}]}));
   await fs.writeFile(path.join(root,'src/demo.ts'),'// @need-ids: REQ_ONE\nexport const value=1;\n');
   await fs.writeFile(path.join(root,'features/demo/client.tsx'),'// @need-ids: REQ_ONE\nexport function Demo(){return null;}\n');
-  await fs.writeFile(path.join(root,'tests/demo.mjs'),'// @need-ids: REQ_ONE\n');
+  await fs.writeFile(path.join(root,'tests/demo.mjs'),'// @need-ids: REQ_ONE, TEST_ONE\nexport function testOne() { return true; }\n');
   await fs.writeFile(path.join(root,'server/adapters/impl/java/Demo.java'),'// @need-ids: REQ_ONE\n');
   await fs.writeFile(path.join(root,'server/adapters/impl/php/demo.php'),'// @need-ids: REQ_ONE\n');
   await fs.writeFile(path.join(root,'server/adapters/impl/cpp/demo.cpp'),'// @need-ids: REQ_ONE\nint demo(){return 1;}\n');
   if(configured){
+    await fs.writeFile(path.join(root,'tests/unattached.mjs'),'// @need-ids: TEST_ONE\n');
     await fs.copyFile(path.join(project,'traceability/conf.py'),path.join(root,'traceability/conf.py'));
     // A local-URL fixture has no repository; Git URL discovery is irrelevant here.
     await fs.appendFile(path.join(root,'traceability/conf.py'),"\nsuppress_warnings = ['codelinks.git_root']\n");
     const config=await fs.readFile(path.join(project,'traceability/ubproject.toml'),'utf8');
     // Keep configured project names but make missing language directories explicit.
-    await fs.writeFile(path.join(root,'traceability/ubproject.toml'),config);
+    await fs.writeFile(path.join(root,'traceability/ubproject.toml'),config.replace('src_dir = "../features"','src_dir = "../features/demo"'));
     for(const name of ['python','go','rust','csharp'])await fs.mkdir(path.join(root,'server/adapters/impl',name),{recursive:true});
-    await fs.writeFile(path.join(root,'traceability/index.rst'),'Index\n=====\n\n.. toctree::\n\n   requirements\n\n'+['frontend','features','backend','tests','cpp','python','go','rust','csharp'].map(name=>`.. src-trace::\n   :project: ${name}\n`).join('\n'));
+    await fs.writeFile(path.join(root,'traceability/index.rst'),'Index\n=====\n\n.. toctree::\n\n   requirements\n\n'+['frontend','features','backend','tests','cpp','python','go','rust','csharp'].map(name=>`.. src-trace::\n   :project: ${name}\n`).join('\n')+'\n.. test:: Independent test\n   :id: TEST_ONE\n');
   }
   await exportNeeds(root);
   return root;
@@ -40,8 +41,20 @@ test('旧独立项目无 Python 配置仍保留引用形状、保存及显式来
   const root=await fixture(t);let result=await traceability(root);
   assert.equal(result.index.state,'unconfigured');assert.equal(result.index.source,'local-marker');
   assert.deepEqual(result.requirements[0].tests,[{path:'tests/demo.mjs',line:1}]);
+  assert.deepEqual((await readNeedsIndex(root)).entities,[]);
   result=await updateRequirement({id:'REQ_ONE',revision:1,title:'原需求',description:'原描述',action:'confirm'},root);
   assert.equal(result.requirements[0].status,'confirmed');
+});
+
+test('实体导出器属于索引修订，修改构建逻辑会改变候选',async t=>{
+  const root=await fixture(t);
+  await fs.mkdir(path.join(root,'scripts'));
+  const file=path.join(root,'scripts/build-needs.py');
+  await fs.writeFile(file,'# first\n');
+  const before=await sourceRevision(root);
+  assert.ok(before['scripts/build-needs.py']);
+  await fs.appendFile(file,'# changed export\n');
+  assert.notDeepEqual(await sourceRevision(root),before);
 });
 
 test('一节点多需求、跨节点关联与验收独立确认保留旧文字确认',async t=>{
@@ -73,10 +86,19 @@ test('真实 Sphinx 构建统一需求关系、多 CodeLinks 引用与 Java/PHP 
   assert.deepEqual(built.relations.find(r=>r.id==='FUNC_6F6E65').flowsTo,['FUNC_74776F']);
   assert.equal(built.relations.find(r=>r.id==='FUNC_6F6E65').importance,'core');
   assert.equal(built.relations.find(r=>r.id==='FUNC_74776F').importance,'normal');
-  const {needs}=await readNeedsIndex(root);
+  const {needs,entities,refs}=await readNeedsIndex(root);
   assert.equal(needs.FUNC_6F6E65.importance,'core');
   assert.equal(needs.FUNC_74776F.importance,'normal');
   assert.equal(needs.REQ_ONE.importance,null); // Field belongs to spec nodes, not requirement confirmation.
+  const demo=entities.find(entity=>entity.path==='features/demo/client.tsx');
+  assert.deepEqual(demo,{path:'features/demo/client.tsx',symbol:'Demo',signature:'function Demo(){return null;}',startLine:2,endLine:2,kind:'function',language:'typescript',needIds:['REQ_ONE'],markerLines:[1],source:'sphinx-codelinks',indexState:'current'});
+  const testEntity=entities.find(entity=>entity.path==='tests/demo.mjs');
+  assert.equal(testEntity.symbol,'testOne');
+  assert.deepEqual(testEntity.needIds,['REQ_ONE','TEST_ONE']);
+  assert.equal(refs.get('TEST_ONE')[0].scope.symbol,'testOne');
+  assert.equal(refs.get('REQ_ONE').find(ref=>ref.path===demo.path).scope.symbol,'Demo');
+  const unattached=entities.find(entity=>entity.path==='tests/unattached.mjs');
+  assert.deepEqual(Object.fromEntries(['symbol','signature','startLine','endLine','kind','language'].map(key=>[key,unattached[key]])),{symbol:null,signature:null,startLine:null,endLine:null,kind:null,language:null});
   const req=built.requirements[0];
   for(const file of ['src/demo.ts','features/demo/client.tsx','server/adapters/impl/cpp/demo.cpp'])assert.ok(req.code.some(ref=>ref.path===file&&ref.source==='sphinx-codelinks'),file);
   assert.ok(req.tests.some(ref=>ref.path==='tests/demo.mjs'&&ref.source==='sphinx-codelinks'));
@@ -86,6 +108,7 @@ test('真实 Sphinx 构建统一需求关系、多 CodeLinks 引用与 Java/PHP 
   assert.equal(await normalizeCodeUrl(root,'https://example.com/evil#L1'),null);
   assert.equal(await normalizeCodeUrl(root,'src/demo.ts#L999'),null);
   const previous=await fs.readFile(path.join(root,'traceability/_build/needs/needs.json'),'utf8');
+  const previousEntities=await fs.readFile(path.join(root,'traceability/_build/needs/code-entities.json'),'utf8');
   // A successful build of old RST must not certify externally edited JSON.
   const requirementFile=path.join(root,'contracts/requirements.json');
   const edited=JSON.parse(await fs.readFile(requirementFile,'utf8'));edited.requirements[0].title='外部编辑';
@@ -94,12 +117,22 @@ test('真实 Sphinx 构建统一需求关系、多 CodeLinks 引用与 Java/PHP 
   assert.equal((await traceability(root)).index.state,'stale');
   edited.requirements[0].title='原需求';await fs.writeFile(requirementFile,JSON.stringify(edited));
   await fs.writeFile(path.join(root,'src/demo.ts'),'// moved\n// @need-ids: REQ_ONE\nexport const value=1;\n');
-  assert.equal((await readNeedsIndex(root)).index.state,'stale');
+  const stale=await readNeedsIndex(root);
+  assert.equal(stale.index.state,'stale');
+  assert.equal(stale.entities.find(entity=>entity.path==='src/demo.ts').indexState,'stale');
+  assert.ok(!stale.refs.get('REQ_ONE').some(ref=>ref.scope));
   await assert.rejects(sourceAt('src/demo.ts',1,root),e=>e.status===404);
   const failed=await buildNeedsIndex(root,{runner:async()=>{throw Error('deliberate build failure');}});
   assert.equal(failed.state,'failed');assert.match(failed.error,/deliberate/);
   const preserved=JSON.parse(await fs.readFile(path.join(root,'traceability/_build/needs/needs.json'),'utf8'));
   assert.deepEqual(preserved.versions[preserved.current_version].needs,JSON.parse(previous).versions[''].needs);
+  assert.equal(await fs.readFile(path.join(root,'traceability/_build/needs/code-entities.json'),'utf8'),previousEntities);
+  assert.ok((await readNeedsIndex(root)).entities.every(entity=>entity.indexState==='failed'));
+  const invalid=await buildNeedsIndex(root,{runner:async(_python,args)=>{
+    await fs.writeFile(path.join(args[2],'code-entities.json'),JSON.stringify({schemaVersion:99,entities:[]}));
+  }});
+  assert.equal(invalid.state,'failed');assert.match(invalid.error,/code-entities/);
+  assert.equal(await fs.readFile(path.join(root,'traceability/_build/needs/code-entities.json'),'utf8'),previousEntities);
   const saved=await updateRequirement({id:'REQ_ONE',revision:1,title:'已保存原文',description:'原描述',action:'save'},root);
   assert.equal(saved.requirements[0].title,'已保存原文');assert.equal(saved.index.state,'failed');
   assert.equal(JSON.parse(await fs.readFile(path.join(root,'contracts/requirements.json'),'utf8')).requirements[0].title,'已保存原文');
@@ -123,6 +156,7 @@ test('显式重建同步 suite 的三个外部修改来源并真正恢复 curren
     for(const suffix of ['.json','.requirements.json'])await fs.copyFile(path.join(project,'contracts',name+suffix),path.join(root,'contracts',name+suffix));
   }
   await fs.copyFile(path.join(project,'traceability/index.rst'),path.join(root,'traceability/index.rst'));
+  await fs.appendFile(path.join(root,'traceability/index.rst'),'\n.. test:: Independent test\n   :id: TEST_ONE\n');
   // The no-feature CLI path must export every existing registered source pair.
   let result=await buildTraceabilityIndex(root,undefined,{python});
   assert.equal(result.index.state,'current',result.index.error);
@@ -139,6 +173,12 @@ test('显式重建同步 suite 的三个外部修改来源并真正恢复 curren
   result=await buildTraceabilityIndex(root,'calculator.suite',{python});
   assert.equal(result.index.state,'current',result.index.error);
   const {needs}=await readNeedsIndex(root);
+  const compute=Object.values(needs).find(need=>need.type==='impl'&&need.source_symbol==='computeAverage');
+  assert.equal(compute.source_path,'server/average.mjs');
+  assert.equal(compute.implements.length,1);
+  assert.deepEqual(needs[compute.implements[0]].fulfills,['REQ_AVERAGE_COMPUTE']);
+  assert.deepEqual(needs.TEST_AVG_20.verifies,['REQ_AVERAGE_ALL.AVG_20','REQ_AVERAGE_COMPUTE.AVG_DIVIDE']);
+  assert.deepEqual(needs.REQ_AVERAGE_COMPUTE.parts.AVG_DIVIDE.verifies_back,['TEST_AVG_20']);
   for(const changed of modified) {
     assert.equal(needs[changed.id].title,changed.title);
     assert.equal(result.requirements.find(r=>r.id===changed.id).title,changed.title);

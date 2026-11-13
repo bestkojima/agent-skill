@@ -58,9 +58,11 @@
 ### 实现与前端对应
 
 - 能力 ID：连接实际运行入口与功能节点的稳定引用；仅可绑定项目中受信任、已登记的能力。
-- 后端实现：入口及相关函数，使用文件、符号和解析出的定位信息；行号是导航结果，函数身份不随行号变化。
+- 后端实现：节点的直接函数与同一能力的相关函数分别提供，使用文件、符号和 CodeLinks 解析出的签名、范围；行号是导航结果，函数身份不随行号变化。
 - 前端入口：实际组件或操作入口及其输入、成功结果、失败反馈。
 - 测试关联：测试用例与验收条件对应；允许多个测试覆盖一个功能。
+
+内部节点的输入输出按具体函数描述；试运行适配器的外部输入另行登记。业务数据流、注册声明的函数调用、运行中观察到的调用分别记录来源。测试以稳定 ID、真实文件及名称关联验收条件，逐用例状态来自执行报告；需求关联到函数不充当执行覆盖率。
 
 实现与测试位置由受支持的索引结果解析；缺项显示待接入。文档中的关联不自动授予运行权限，画布也不接受任意 Shell 命令。
 
@@ -94,7 +96,7 @@
 
 ## Sphinx-Needs、CodeLinks、ubCode 的职责
 
-Codex 根据自然语言整理结构化需求；Sphinx-Needs 解析需求条目、类型与关系。CodeLinks 读取源码标记并建立引用。ubCode 提供兼容的索引、诊断和 CLI/MCP 查询；React Flow 显示这些数据并提供编辑与运行入口。
+Codex 根据自然语言整理结构化需求；Sphinx-Needs 解析 `req/spec/impl/test` 条目、验收子条目与关系。CodeLinks 读取源码标记并提供函数身份、签名和范围。ubCode 可提供兼容的索引、诊断和 CLI/MCP 查询，当前保持未接入；React Flow 提供编辑与运行入口。操作方法见 [Sphinx-Needs 与 CodeLinks 用法](../../README.md#sphinx-needs-与-codelinks-用法)。
 
 官方依据：[Sphinx-Needs](https://sphinx-needs.readthedocs.io/en/latest/)、[needs.json 构建](https://sphinx-needs.readthedocs.io/en/latest/builders.html)、[CodeLinks](https://codelinks.useblocks.com/)、[ubCode 与 Sphinx 集成](https://ubcode.useblocks.com/paths/sphinx.html)、[ubCode MCP](https://ubcode.useblocks.com/features/mcp/index.html)。ubCode 的项目 MCP 工具需要适用的项目许可；工具安装和许可可用性须分别确认。
 

@@ -2,6 +2,7 @@ import { runCalculation, testCalculatorNode } from '../../server/calculator.mjs'
 import { runSum, testSumNode } from '../../server/sum.mjs';
 import { runExpression, testExpressionNode } from '../../server/expression.mjs';
 import { runAverage, testAverageNode } from '../../server/average.mjs';
+import { averageTestCases } from './test-cases.mjs';
 const frontend = mode => ({entry:'calculator',feature:'suite',component:'ExpressionCalculator',path:'features/calculator/client.tsx',mode});
 const calculatorFrontend=frontend;
 const modes=[['suite','calculator.suite','计算器','calculator-suite','suite','suite'],['calculator','calculator.calculate','两数四则运算','calculator','calculator','calc-compute'],['sum','sum.calculate','多数字求和','sum','sum','sum-accumulate'],['expression','expression.calculate','混合四则运算','expression','expression','expr-compute']];
@@ -36,6 +37,7 @@ const capabilities=[
     implementation:[{path:'server/average.mjs',symbol:'runAverage'},{path:'server/average.mjs',symbol:'validateAverageInput'},
       {path:'server/average.mjs',symbol:'accumulateAverage'},{path:'server/average.mjs',symbol:'computeAverage'}],
     testFiles:['tests/average.test.mjs','tests/average-api.test.mjs','tests/calculator-input.test.mjs'],
+    testCases:averageTestCases,
     requirementIds:['REQ_AVERAGE_ALL','REQ_AVERAGE_VALIDATE','REQ_AVERAGE_ACCUMULATE','REQ_AVERAGE_COMPUTE'] }
 ];
 const routes=[[runCalculation,testCalculatorNode,'calculator'],[runSum,testSumNode,'sum'],[runExpression,testExpressionNode,'expression'],[runAverage,testAverageNode,'average']].flatMap(([run,test,id])=>[
@@ -49,4 +51,11 @@ const code=[
   ...refs('expression',{expression:'runExpression','expr-input':'captureExpressionInput','expr-compute':'runExpressionCompute','expr-tokenize':'tokenizeExpression','expr-parse':'parseExpression','expr-evaluate':'evaluateExpression','expr-result':'expressionUi'}),
   ...refs('average',{average:'runAverage','avg-validate':'validateAverageInput','avg-accumulate':'accumulateAverage','avg-compute':'computeAverage'})
 ];
-export default {id:'calculator',features,capabilities,routes,code};
+// Reviewed caller relationships. Runtime observations are emitted separately by runAverage.
+const averageFunction=symbol=>({path:'server/average.mjs',symbol});
+const calls=['validateAverageInput','accumulateAverage','computeAverage','averageUi'].map(symbol=>({
+  caller:averageFunction('runAverage'),callee:averageFunction(symbol)
+}));
+const trials=[{capabilityId:'average.calculate',inputSchema:{type:'object',required:['values'],properties:{values:{type:'array',minItems:1,items:{type:['number','string']}}}},
+  description:'节点试运行接收原始 values，由 testAverageNode 准备前置步骤；内部函数使用节点 inputSchema。'}];
+export default {id:'calculator',features,capabilities,routes,code,calls,trials};
