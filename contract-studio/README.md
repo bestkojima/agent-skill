@@ -1,12 +1,25 @@
-# Contract Studio — 从功能节点到可运行的软件
+# Contract Studio — 节点驱动开发框架
 
-本项目维护一个帮助 AI 按功能节点开发软件的 Skill。工作台承载节点编辑、需求追踪和功能验证；计算器与反馈工单是演示和测试题。
+框架提供功能图、节点属性、需求索引、实现绑定和测试证据；精简 Skill 指导 Agent 在这些能力中完成开发。计算器与反馈工单用于演示框架。
 
 使用时，在功能图中添加节点、写清输入输出和验收条件，把开发任务交给当前 Codex；实现完成后，回到同一工作台操作功能、查看源码和真实测试报告。
 
 [Skill 入口](.agents/skills/contract-studio/SKILL.md) · [Skill 验收](docs/skill-evaluation.md) · [节点契约与验收规格](docs/design/skill-workbench.md) · [领域术语](GLOSSARY.md) · [架构决定](docs/adr/0001-feature-graph-and-codex-workflow.md)
 
-在其他项目使用时，按[外部项目起步指南](.agents/skills/contract-studio/references/external-project.md)映射已有需求、节点与实现来源；项目已有界面可直接沿用，无需先搭工作台。
+## Agent 的框架入口
+
+以当前节点任务为入口，按需读取对应接口和源文件。字段定义、工具配置和运行状态由框架维护，Skill 只保留操作流程。
+
+| 操作 | 现有入口 |
+| --- | --- |
+| 读取节点与关联 | `GET /api/traceability?feature=<已登记功能>`；返回持久图、需求、代码／测试引用与索引状态 |
+| 获取开发上下文 | 工作台“文档与任务”导出节点任务；当前没有独立的任务导出 API |
+| 保存契约 | `POST /api/traceability/graph` 携带 `featureId`、`graph`、`expectedGraph`；需求用 `/api/traceability/requirement`，修改已有需求携带 `revision`。载荷见 `server/api.mjs`、`server/traceability.mjs` |
+| 接入实现 | 在 `server/capabilities.mjs` 登记能力，在 `server/api.mjs` 接入路由并实现前端操作，再设置节点 `capabilityId` |
+| 更新索引 | `node scripts/build-index.mjs` 或 `POST /api/traceability/build`；源码与测试使用 `@need-ids:` 标记 |
+| 读取／执行测试 | `GET /api/capabilities/evidence?capabilityId=…` 读取证据；获准运行后用 `POST /api/capabilities/test` 执行登记测试 |
+
+功能来源、运行能力及前端跳转目前采用显式登记；新增能力需完成这些接入点，添加图节点只建立规格。需求源与节点源位于 `contracts/`，保存逻辑见 `server/traceability.mjs`。开发上下文的导出为快照，接手时核对当前持久状态。
 
 ## 启动工作台
 
@@ -146,7 +159,7 @@ C++、Java 演示解析器只面向平面字符串表单；扩展为嵌套业务
 
 ## 检查与维护入口
 
-下面的命令验证示例项目的实现。Skill 的可复用性通过独立 AI 在新任务中的实际使用验证，方法与结果见 [Skill 验收](docs/skill-evaluation.md)。平均值跑通为示例证据，不能直接得出 Skill 已通过的结论。
+下面的命令检查框架与示例实现。Skill 的验收关注 Agent 能否沿用框架入口完成节点任务，见 [Skill 验收](docs/skill-evaluation.md)。
 
 ```bash
 npm run build          # React + TypeScript 构建
