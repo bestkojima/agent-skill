@@ -18,13 +18,13 @@
 
 .sum-panel{background:linear-gradient(155deg,#fff 40%,#f6fafb)}.sum-intro{font-size:12px;line-height:1.55;color:#627989;margin:0 0 10px}.sum-input label{display:flex;justify-content:space-between;gap:8px}.sum-input label span{color:#8b9ba7;font-weight:400}.sum-input textarea{font-size:13px;line-height:1.55;resize:vertical;min-height:58px}.sum-result{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-top:12px;padding:10px 13px;border-radius:9px;background:#eaf5f2;color:#247564}.sum-result>span{font-size:12px;font-weight:700;white-space:nowrap}.sum-result strong{font-size:25px;font-variant-numeric:tabular-nums;text-align:right;overflow-wrap:anywhere}.sum-result strong.sum-placeholder{font-size:12px;font-weight:500;color:#809b97}.sum-result.is-error{background:#fff1ed;color:#a64c33}.sum-result.is-error strong{font-size:13px;line-height:1.5}.sum-process{margin-top:13px}.sum-process-heading{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:7px;font-size:12px;color:#39576a}.sum-process-heading span{font-size:11px;color:#82959f}.sum-steps{list-style:none;margin:0;padding:0;max-height:145px;overflow:auto;border:1px solid #e4edf0;border-radius:8px;background:#fff;font-variant-numeric:tabular-nums}.sum-steps li{display:grid;grid-template-columns:32px minmax(0,1fr) auto;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid #edf2f3;font-size:12px;color:#476170}.sum-steps li:last-child{border-bottom:0}.sum-step-index{color:#92a6ad;font-size:11px}.sum-step-equation{overflow-wrap:anywhere}.sum-step-equation span{color:#9bb1b7;padding:0 3px}.sum-steps strong{color:#267966;font-weight:700}
 
-.nested-compute-heading .group-name{font-size:15px}.nested-compute-heading .group-requirement{font-size:11px}.group-run{display:inline-block;margin-left:8px;font-size:11px;font-weight:700;color:#267966}.group-run.rejected{color:#ad583e}.group-run.mock{color:#9a7436}
+.nested-group-heading .group-name{font-size:15px}.nested-group-heading .group-requirement{font-size:11px}.group-run{display:inline-block;margin-left:8px;font-size:11px;font-weight:700;color:#267966}.group-run.rejected{color:#ad583e}.group-run.mock{color:#9a7436}
 .expression-panel{background:linear-gradient(155deg,#fff 40%,#f6fafb)}.expression-intro{font-size:12px;line-height:1.55;color:#627989;margin:0 0 10px}.expression-input label{display:flex;justify-content:space-between;gap:8px}.expression-input label span{color:#8b9ba7;font-weight:400}.expression-input input{font-size:16px;min-height:43px;letter-spacing:.1px}.expression-result{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-top:12px;padding:10px 13px;border-radius:9px;background:#eaf5f2;color:#247564}.expression-result>span{font-size:12px;font-weight:700;white-space:nowrap}.expression-result strong{font-size:25px;font-variant-numeric:tabular-nums;text-align:right;overflow-wrap:anywhere}.expression-result strong.expression-placeholder{font-size:12px;font-weight:500;color:#809b97}.expression-result.is-error{background:#fff1ed;color:#a64c33}.expression-result.is-error strong{font-size:13px;line-height:1.5}.expression-process{margin-top:13px}.expression-process-heading{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:7px;font-size:12px;color:#39576a}.expression-process-heading span{font-size:11px;color:#82959f}.expression-steps{list-style:none;margin:0;padding:0;max-height:145px;overflow:auto;border:1px solid #e4edf0;border-radius:8px;background:#fff;font-variant-numeric:tabular-nums}.expression-steps li{display:grid;grid-template-columns:32px minmax(0,1fr) auto;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid #edf2f3;font-size:12px;color:#476170}.expression-steps li:last-child{border-bottom:0}.expression-step-index{color:#92a6ad;font-size:11px}.expression-step-equation{overflow-wrap:anywhere}.expression-steps strong{color:#267966;font-weight:700}
 .expression-precision{font-size:11px;line-height:1.5;color:#637c88}
 
 /* The interactive calculator belongs beneath the graph, not in a floating mockup. */
-.canvas.with-expression-calculator{position:static;height:auto;min-height:0}
-.canvas.with-expression-calculator>.react-flow{flex:none;height:calc(100vh - 255px);min-height:430px}
+.canvas.with-feature-panel{position:static;height:auto;min-height:0}
+.canvas.with-feature-panel>.react-flow{flex:none;height:calc(100vh - 255px);min-height:430px}
 .expression-calculator{padding:24px 20px 28px;background:#f4f6f8;border-top:1px solid #e2e9ed}
 .expression-calculator-heading,.expression-calculator form,.expression-calculator-hint{max-width:420px;margin-left:auto;margin-right:auto}
 .expression-calculator-heading{display:flex;align-items:end;justify-content:space-between;gap:12px;margin-bottom:14px}
@@ -34,7 +34,7 @@
 .expression-calculator-display input{width:100%;border:0;border-bottom:1px solid #e6eef1;background:transparent;color:#3c5968;text-align:right;font-size:16px;padding:5px 0 9px;outline:none}
 .expression-calculator-display input:focus{border-color:#5795ab}.expression-calculator-output{min-height:38px;display:flex;align-items:center;justify-content:flex-end;text-align:right;overflow-wrap:anywhere;color:#163c4d;font-size:28px;font-weight:700;font-variant-numeric:tabular-nums}.expression-calculator-output.is-error{font-size:14px;line-height:1.45;color:#a64c33}
 .expression-calculator-keys{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px;margin-top:8px}.expression-calculator-key{min-height:49px;border:1px solid #e1e8ec;border-radius:7px;background:#fff;color:#263e4c;font-size:19px;font-weight:600;box-shadow:0 1px 2px #294c6a0d}.expression-calculator-key.utility,.expression-calculator-key.operator{background:#eaf0f3;color:#37596a}.expression-calculator-key.equals{background:#175c73;border-color:#175c73;color:#fff;font-size:22px}.expression-calculator-key:hover{filter:brightness(.97)}.expression-calculator-key:focus-visible{outline:2px solid #287d99;outline-offset:2px}.expression-calculator-hint{font-size:11px;line-height:1.5;color:#718a96;margin-top:10px;margin-bottom:0}
-@media(max-width:980px){.canvas.with-expression-calculator>.react-flow{height:470px;min-height:0}}
+@media(max-width:980px){.canvas.with-feature-panel>.react-flow{height:470px;min-height:0}}
 @media(max-width:460px){.expression-calculator{padding:18px 12px}.expression-calculator-key{min-height:46px}}
 
 /* Keep the selected node and the live calculation easy to reach beside the graph. */
@@ -47,7 +47,7 @@
 @media(min-width:981px){.expression-side{position:sticky;top:10px;max-height:calc(100vh - 20px);overflow:auto}}
 @media(max-width:980px){.right-side.expression-side{display:flex}}
 .react-flow__node.selected:has(.group-heading){outline:2px solid #6d9fbf!important;outline-offset:2px}
-.with-expression-calculator .node-kicker{font-size:15px}.with-expression-calculator .node-name{font-size:21px}.with-expression-calculator .node-requirement,.with-expression-calculator .group-requirement{font-size:14px}.with-expression-calculator .group-name{font-size:18px}.with-expression-calculator .branch-label{font-size:15px}
+.with-feature-panel .node-kicker{font-size:15px}.with-feature-panel .node-name{font-size:21px}.with-feature-panel .node-requirement,.with-feature-panel .group-requirement{font-size:14px}.with-feature-panel .group-name{font-size:18px}.with-feature-panel .branch-label{font-size:15px}
 
 /* Each source and test reference opens its own evidence panel in place. */
 .trace-reference{border:1px solid #e3ebef;border-radius:9px;background:#f8fafb;margin:6px 0;overflow:hidden;transition:border-color .2s ease,box-shadow .2s ease}
@@ -166,3 +166,29 @@
 .importance-legend>span:first-child{margin-right:3px}
 .field .importance-select{border-left:4px solid var(--importance-accent);color:var(--importance-ink);transition:border-color .15s,color .15s}
 @media(prefers-reduced-motion:reduce){.importance-badge,.group-heading[class*="importance-"],.field .importance-select{transition:none}}
+
+.catalog-state{max-width:680px;margin:10vh auto;padding:28px;color:#476170;line-height:1.7}
+.catalog-state h1{font-size:24px;color:#25495d}
+.graph-view-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:9px 15px;border-bottom:1px solid #e5edf1;background:#fafcfd}
+.graph-view-controls button{border:1px solid #d7e3ea;border-radius:7px;background:#fff;color:#41647a;padding:7px 11px;font-size:12px;font-weight:650}
+.graph-view-controls button[aria-pressed=true]{background:#eee8f7;border-color:#b9a0d6;color:#69418d}
+.graph-view-controls button:hover{border-color:#8eaebb;background:#f0f7fa}
+.graph-view-controls button:focus-visible,.focus-path button:focus-visible{outline:2px solid #3b8299;outline-offset:2px}
+.graph-view-controls>span{margin-left:auto;font-size:12px;color:#738996}
+.focus-path{display:flex;flex-wrap:wrap;align-items:center;gap:7px;padding:10px 15px;border-bottom:1px solid #dce9ef;background:#f0f7fa;color:#365d72;font-size:13px}
+.focus-path>span{color:#768d9b;font-size:12px;margin-right:3px}
+.focus-path button{border:0;background:none;padding:2px;color:#426e85;font-size:13px}
+.importance-muted>.node-card{background:#f8fafb;box-shadow:none;border-color:#dbe3e8;border-left-color:#b1bdc6}
+.importance-muted>.node-card .node-name,.importance-muted>.group-heading .group-name{color:#6c7d8b}
+.importance-muted .importance-badge{background:#f0f3f5;color:#7b8a96}
+.importance-emphasis>.node-card{box-shadow:0 0 0 2px var(--importance-tint),0 5px 18px #31465e1c}
+.importance-emphasis>.group-heading{background:#ffffff9c}
+.feature-outlet{scroll-margin-top:20px;border-top:1px solid #e1e9ed;background:#f4f6f8}
+.feature-outlet>.preview-panel{max-width:780px;margin:24px auto}
+.feature-outlet>.adapter-bar{background:#edf4f6}
+.feature-outlet .suite-calculator{border-top:0}
+.canvas.is-focused .node-kicker,.canvas.is-focused .importance-badge{font-size:13px}
+.canvas.is-focused>.react-flow{min-height:480px}
+.canvas-footer>span:last-child{flex:none;text-align:right}
+.canvas-footer small{display:block;margin-top:3px;font-size:11px;color:#8a9ba7}
+@media(max-width:600px){.graph-view-controls>span{width:100%;margin-left:0}.feature-outlet>.preview-panel{margin:16px 10px}}

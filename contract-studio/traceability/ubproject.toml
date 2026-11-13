@@ -25,6 +25,12 @@ comment_type = "ts"
 [codelinks.projects.frontend.analyse]
 get_need_id_refs = true
 
+[codelinks.projects.features.source_discover]
+src_dir = "../features"
+comment_type = "ts"
+[codelinks.projects.features.analyse]
+get_need_id_refs = true
+
 [codelinks.projects.backend.source_discover]
 src_dir = "../server"
 comment_type = "ts"

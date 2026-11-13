@@ -48,7 +48,7 @@
         "category": "feature",
         "detail": "阅读时希望减少亮度"
       },
-      "code": "src/App.tsx#FeedbackPreview",
+      "code": "features/feedback/client.tsx#FeedbackPreview",
       "test": "tests/domain.test.mjs"
     },
     {

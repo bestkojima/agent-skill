@@ -11,9 +11,9 @@ Read the [framework entry points](../../../README.md#agent-的框架入口) for 
 
 ## Node workflow
 
-1. **Read context.** Load the current graph, target node (or parent for a new node), linked requirements, direct dependencies, implementation references and evidence. Treat exported node tasks as snapshots and reconcile them with saved state. For a read-only request, report findings here.
+1. **Read context.** Use the framework's node-context entry point for the target node (or parent for a new node): contract, importance, linked requirements, direct dependencies, implementation references, gaps and evidence. Reconcile exported snapshots with saved state; distinguish draft previews. For a read-only request, report findings here.
 2. **Save the contract.** Create or update the node's responsibility, importance (`core` / `key` / `normal`), inputs, outputs, rules, errors, acceptance criteria and requirement links through the framework's source and save path. Keep stable IDs and existing confirmation scope; record new confirmation only from the user. Save the selected contract and task context before implementation.
-3. **Implement and bind.** When implementation is authorized, use the current agent session to implement the node's behaviour, frontend operation and tests. Divide functions by responsibility; one functional node may map to several functions. Preserve existing callers. Register the actual backend, frontend and test entry points, then bind the node to the trusted capability.
+3. **Implement and bind.** When implementation is authorized, use the current agent session to implement the node's behaviour, frontend operation and tests. Divide functions by responsibility; one functional node may map to several functions. Preserve existing callers. Use the feature registration to connect backend, frontend and tests, then bind the node to the trusted capability.
 4. **Refresh and report.** Add requirement-ID references to code and tests, rebuild the framework index, and verify affected behaviour and frontend interactions within the task's authorization. Leave actual test evidence and remaining gaps available from the node; report its location and usable frontend entry.
 
 ## Framework invariants

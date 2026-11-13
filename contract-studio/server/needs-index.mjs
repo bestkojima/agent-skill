@@ -27,7 +27,7 @@ export async function sourceRevision(root) {
       }
     }
   }
-  for(const dir of ['contracts','src','server','tests','traceability'])await walk(dir);
+  for(const dir of ['contracts','src','server','features','tests','traceability'])await walk(dir);
   for(const file of ['pyproject.toml','uv.lock'])if(await exists(path.join(root,file))){const stat=await fs.stat(path.join(root,file));files[file]={size:stat.size,mtimeMs:stat.mtimeMs};}
   return files;
 }
@@ -51,7 +51,7 @@ export async function localMarkerReferences(root, extensions = sourceExtensions)
       });
     }
   }
-  for(const dir of ['src','server','tests'])await scan(dir);
+  for(const dir of ['src','server','features','tests'])await scan(dir);
   return refs;
 }
 

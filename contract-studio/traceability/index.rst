@@ -16,6 +16,9 @@ Contract Studio 需求追踪
    :project: frontend
 
 .. src-trace::
+   :project: features
+
+.. src-trace::
    :project: backend
 
 .. src-trace::

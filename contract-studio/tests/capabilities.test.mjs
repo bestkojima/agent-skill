@@ -37,5 +37,8 @@ test('真实固定测试报告持久化；行为变化过期，布局与重要�
   await fs.writeFile(path.join(root,'tests/average.test.mjs'),"import test from 'node:test';test('actual failure',()=>{throw Error('failure evidence')});\n");
   const failure=await runCapabilityTests('average.calculate',root);
   assert.equal(failure.state,'failed');assert.equal(failure.failed,1);assert.notEqual(failure.exitCode,0);
+  await fs.mkdir(path.join(root,'features/demo'),{recursive:true});
+  await fs.writeFile(path.join(root,'features/demo/client.tsx'),'export function Feature(){return null;}\n');
+  assert.equal((await capabilityEvidence('average.calculate',root)).state,'stale','feature modules are part of the inspected candidate');
   await assert.rejects(runCapabilityTests('../untrusted',root),/未知/);
 });

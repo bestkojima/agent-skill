@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 
 export type Capability = {
   id:string;title:string;nodeIds:string[];rootNodeId:string;runPath:string;testPath:string;
-  frontend?:{component:string;path:string;mode?:string};implementation:{path:string;symbol:string}[];
+  frontend?:{entry:string;feature:string;component:string;path:string;mode?:string};implementation:{path:string;symbol:string}[];
   testFiles:string[];requirementIds:string[];
 };
 export type TestEvidence = {capabilityId:string;state:'not-run'|'passed'|'failed'|'stale';passed?:number;failed?:number;durationMs?:number;startedAt?:string;completedAt?:string;exitCode?:number;output?:string;command?:string[];message?:string};

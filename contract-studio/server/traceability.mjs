@@ -4,20 +4,13 @@ import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { readNeedsIndex, buildNeedsIndex, indexConfigured } from './needs-index.mjs';
 import { nodeImportance } from '../src/node-importance.mjs';
+import { featureRegistry } from './feature-registry.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const features = Object.freeze({
-  'feedback.submit': Object.freeze({ requirementFile: 'contracts/requirements.json', graphFile: 'contracts/feedback.json', rstFile: 'traceability/requirements.rst' }),
-  'calculator.calculate': Object.freeze({ requirementFile: 'contracts/calculator.requirements.json', graphFile: 'contracts/calculator.json', rstFile: 'traceability/calculator.rst' }),
-  'sum.calculate': Object.freeze({ requirementFile: 'contracts/sum.requirements.json', graphFile: 'contracts/sum.json', rstFile: 'traceability/sum.rst' }),
-  'expression.calculate': Object.freeze({ requirementFile: 'contracts/expression.requirements.json', graphFile: 'contracts/expression.json', rstFile: 'traceability/expression.rst' }),
-  'calculator.suite': Object.freeze({ requirementFile: 'contracts/calculator-suite.requirements.json', graphFile: 'contracts/calculator-suite.json', rstFile: 'traceability/calculator-suite.rst' }),
-});
-const suiteSources = ['calculator.calculate', 'sum.calculate', 'expression.calculate'];
-function featureConfig(featureId = 'feedback.submit') {
-  // The original entry point uses the existing feedback files regardless of
-  // their feature ID. Only explicitly registered feature IDs select new files.
-  return features[featureId === 'calculator.calculate' || featureId === 'sum.calculate' || featureId === 'expression.calculate' || featureId === 'calculator.suite' ? featureId : 'feedback.submit'];
+function featureConfig(featureId) {
+  // Legacy direct callers may use their own feature ID in the original file pair.
+  // Public API callers resolve registered IDs before entering this compatibility path.
+  return featureRegistry.resolveFeature(featureId)??featureRegistry.defaultTrace;
 }
 const nodeIdsOf = requirement => requirement.nodeIds ?? [requirement.nodeId].filter(Boolean);
 const acceptanceOf = requirement => requirement.acceptance ?? [];
@@ -62,7 +55,7 @@ async function loadRequirements(root, feature = featureConfig()) {
   return data;
 }
 
-function validateGraph(graph, featureId) {
+export function validateGraph(graph, featureId) {
   if (!graph || typeof graph !== 'object' || graph.version !== 2 || graph.feature?.id !== featureId || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) throw new TraceError('功能图格式或 featureId 不匹配');
   if (typeof graph.feature.title !== 'string' || typeof graph.feature.goal !== 'string') throw new TraceError('功能图缺少标题或目标');
   const ids = new Set();
@@ -111,9 +104,9 @@ function rstText(data, graph, feature = featureConfig()) {
   const { requirementFile, graphFile } = feature;
   const esc = (s) => s.replaceAll('\\', '\\\\').replaceAll('*', '\\*').replaceAll('`', '\\`').replaceAll('|', '\\|').replaceAll('_', '\\_');
   // Hex-encoded UTF-8 is reversible and collision-free, including case and punctuation.
-  const functionId = (nodeId) => `FUNC_${data.featureId === 'calculator.suite' ? 'SUITE_' : ''}${Buffer.from(nodeId, 'utf8').toString('hex').toUpperCase()}`;
+  const functionId = (nodeId) => `FUNC_${feature.specPrefix??''}${Buffer.from(nodeId, 'utf8').toString('hex').toUpperCase()}`;
   const lines = ['需求与功能图', '============', '', `.. 由 ${requirementFile} 和 ${graphFile} 生成；请修改源文件或使用工作台，不要直接编辑。`, '', '需求条目', '--------', ''];
-  for (const r of (data.featureId === 'calculator.suite' ? data.requirements.filter(r => !r.sourceFeatureId) : data.requirements)) {
+  for (const r of (feature.requirementSources?.length ? data.requirements.filter(r => !r.sourceFeatureId) : data.requirements)) {
     lines.push(`.. req:: ${esc(r.title)}`, `   :id: ${r.id}`, `   :status: ${r.status}`, '', ...r.description.split('\n').map(line => `   ${esc(line)}`), '');
     if (acceptanceOf(r).length) {
       lines.push('   验收条件::', '', `      ${JSON.stringify(acceptanceOf(r))}`, '');
@@ -142,7 +135,7 @@ function rstText(data, graph, feature = featureConfig()) {
 
 export async function exportNeeds(root = projectRoot, featureId = 'feedback.submit') {
   const feature = featureConfig(featureId);
-  const data = featureId === 'calculator.suite' ? await suiteRequirements(root) : await loadRequirements(root, feature);
+  const data = await combinedRequirements(root, feature);
   const graph = await loadGraph(root, data.featureId, feature);
   const target = path.join(root, feature.rstFile);
   const text = rstText(data, graph, feature);
@@ -153,8 +146,8 @@ export async function exportNeeds(root = projectRoot, featureId = 'feedback.subm
 }
 
 async function exportBuildSources(root, featureId) {
-  const selected = featureId === undefined ? Object.keys(features)
-    : featureId === 'calculator.suite' ? [...suiteSources, featureId] : [featureId];
+  const selected = featureId === undefined ? featureRegistry.features.map(feature=>feature.id)
+    : [...(featureConfig(featureId).requirementSources??[]),featureId];
   for(const id of selected) {
     const feature = featureConfig(id);
     // Legacy projects/fixtures may contain just the original feedback pair.
@@ -179,9 +172,9 @@ export async function buildTraceabilityIndex(root = projectRoot, featureId, opti
 }
 
 // Imported requirements remain in their original files; this is a live view.
-async function suiteRequirements(root) {
-  const own = await loadRequirements(root, featureConfig('calculator.suite'));
-  const sources = await Promise.all(suiteSources.map(async featureId => {
+async function combinedRequirements(root, feature) {
+  const own = await loadRequirements(root, feature);
+  const sources = await Promise.all((feature.requirementSources??[]).map(async featureId => {
     const data = await loadRequirements(root, featureConfig(featureId));
     return data.requirements.map(r => ({...r, sourceFeatureId: featureId}));
   }));
@@ -190,7 +183,7 @@ async function suiteRequirements(root) {
 
 export async function traceability(root = projectRoot, featureId) {
   const feature = featureConfig(featureId);
-  const data = featureId === 'calculator.suite' ? await suiteRequirements(root) : await loadRequirements(root, feature);
+  const data = await combinedRequirements(root, feature);
   if (featureId !== undefined && data.featureId !== featureId) throw new TraceError('需求文件的功能 ID 不匹配');
   const graph = await loadGraph(root, data.featureId, feature);
   const {index, needs, refs} = await readNeedsIndex(root);
@@ -198,8 +191,8 @@ export async function traceability(root = projectRoot, featureId) {
   try { sphinxState = (await fs.readFile(path.join(root, feature.rstFile), 'utf8')) === rstText(data, graph, feature) ? 'current' : 'outdated'; }
   catch (e) { if (e.code !== 'ENOENT') throw e; }
   let indexSourcesCurrent=sphinxState==='current';
-  if(index.state==='current' && indexSourcesCurrent && featureId==='calculator.suite') {
-    for(const sourceId of suiteSources) {
+  if(index.state==='current' && indexSourcesCurrent && feature.requirementSources?.length) {
+    for(const sourceId of feature.requirementSources) {
       const sourceFeature=featureConfig(sourceId);
       const sourceData=await loadRequirements(root,sourceFeature);
       const sourceGraph=await loadGraph(root,sourceId,sourceFeature);
@@ -233,15 +226,15 @@ export function updateRequirement(body, root = projectRoot) {
     if (body.action !== 'create' && !Number.isInteger(body.revision)) throw new TraceError('Invalid revision');
     if (typeof body.title !== 'string' || !body.title.trim() || body.title.length > 200 || /[\r\n]/.test(body.title)) throw new TraceError('需求标题须为 1–200 字且不能换行');
     if (typeof body.description !== 'string' || !body.description.trim() || body.description.length > 5000) throw new TraceError('需求描述须为 1–5000 字');
-    const isSuite = body.featureId === 'calculator.suite';
-    const combined = isSuite ? await suiteRequirements(root) : null;
-    if (isSuite && body.action === 'create' && combined.requirements.some(r => r.id === body.id)) throw new TraceError('需求 ID 已存在', 409);
-    const owner = isSuite && body.action !== 'create' ? combined.requirements.find(r => r.id === body.id)?.sourceFeatureId : undefined;
+    const isCombined = Boolean(featureConfig(body.featureId).requirementSources?.length);
+    const combined = isCombined ? await combinedRequirements(root, featureConfig(body.featureId)) : null;
+    if (isCombined && body.action === 'create' && combined.requirements.some(r => r.id === body.id)) throw new TraceError('需求 ID 已存在', 409);
+    const owner = isCombined && body.action !== 'create' ? combined.requirements.find(r => r.id === body.id)?.sourceFeatureId : undefined;
     const feature = featureConfig(owner ?? body.featureId);
     const data = await loadRequirements(root, feature);
     const featureId = owner ?? body.featureId ?? data.featureId;
     if (data.featureId !== featureId) throw new TraceError('需求文件的功能 ID 不匹配');
-    if (body.featureId && !isSuite && body.featureId !== data.featureId) throw new TraceError('当前功能图不匹配需求来源', 409);
+    if (body.featureId && !isCombined && body.featureId !== data.featureId) throw new TraceError('当前功能图不匹配需求来源', 409);
     const nodeIds = body.nodeIds === undefined ? undefined : validateNodeIds(body.nodeIds);
     const acceptance = body.acceptance === undefined ? undefined : validateAcceptance(body.acceptance);
     if (body.action === 'create') {
@@ -286,9 +279,9 @@ export function updateRequirement(body, root = projectRoot) {
       // Re-sync a missing or externally edited derived view on an explicit save.
       await persist(root, data, feature);
     }
-    if (isSuite && owner) await exportNeeds(root, 'calculator.suite');
+    if (isCombined && owner) await exportNeeds(root, body.featureId);
     if (await indexConfigured(root)) await buildNeedsIndex(root);
-    return traceability(root, isSuite ? 'calculator.suite' : featureId);
+    return traceability(root, isCombined ? body.featureId : featureId);
   });
 }
 

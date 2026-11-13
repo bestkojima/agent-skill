@@ -12,14 +12,18 @@
 
 | 操作 | 现有入口 |
 | --- | --- |
-| 读取节点与关联 | `GET /api/traceability?feature=<已登记功能>`；返回持久图、需求、代码／测试引用与索引状态 |
-| 获取开发上下文 | 工作台“文档与任务”导出节点任务；当前没有独立的任务导出 API |
+| 发现功能 | `GET /api/features`；返回已登记功能、图、前端入口及运行能力 |
+| 读取节点上下文 | `GET /api/node-context?feature=<别名或功能ID>&nodeId=<节点ID>`；返回结构化 `context`、节点说明 `markdown` 和开发任务 `taskMarkdown` |
+| 预览画布草稿 | `POST /api/node-context/preview` 携带 `featureId`、`graph`、`nodeId`；使用当前画布和已保存需求，只读生成与侧栏相同的上下文 |
+| 读取完整图与关联 | `GET /api/traceability?feature=<已登记功能>`；返回持久图、需求、代码／测试引用与索引状态 |
 | 保存契约 | `POST /api/traceability/graph` 携带 `featureId`、`graph`、`expectedGraph`；需求用 `/api/traceability/requirement`，修改已有需求携带 `revision`。载荷见 `server/api.mjs`、`server/traceability.mjs` |
-| 接入实现 | 在 `server/capabilities.mjs` 登记能力，在 `server/api.mjs` 接入路由并实现前端操作，再设置节点 `capabilityId` |
+| 接入实现 | 在 `features/<功能>/server.mjs` 声明来源、可信路由、能力与代码绑定，并由 `server/feature-registry.mjs` 登记；对应 `client.tsx` 提供前端操作，再设置节点 `capabilityId` |
 | 更新索引 | `node scripts/build-index.mjs` 或 `POST /api/traceability/build`；源码与测试使用 `@need-ids:` 标记 |
 | 读取／执行测试 | `GET /api/capabilities/evidence?capabilityId=…` 读取证据；获准运行后用 `POST /api/capabilities/test` 执行登记测试 |
 
-功能来源、运行能力及前端跳转目前采用显式登记；新增能力需完成这些接入点，添加图节点只建立规格。需求源与节点源位于 `contracts/`，保存逻辑见 `server/traceability.mjs`。开发上下文的导出为快照，接手时核对当前持久状态。
+功能登记由服务端维护，工作台自动发现对应的前端模块；新增业务无需在 API 分发、追踪核心和工作台各加一份功能名单。需求源与节点源位于 `contracts/`，保存逻辑见 `server/traceability.mjs`。画布上的 `capabilityId` 只能选择已登记能力，不能提供执行代码。
+
+节点上下文由框架统一生成，侧栏、导出文件和 Agent API 共用一份结果。导出仍是快照，接手时读取当前状态。草稿预览会标明来源；行为契约发生未保存修改时，已保存版本的测试结果不能覆盖该草稿。
 
 ## 启动工作台
 
@@ -79,6 +83,8 @@ npm run dev -- --host 127.0.0.1
 节点类型改为功能组后，可以继续添加子节点。新节点没有实际能力时显示“待实现”，先完成开发和登记再运行。
 
 在侧栏修改“逻辑重要性”，画布同步显示颜色与等级文字：**核心逻辑（紫色）**、**关键逻辑（琥珀色）**、**普通组成逻辑（蓝灰色）**。保存到项目后保留选择，节点说明和开发任务也携带等级。新节点及未设置等级的旧节点默认为普通组成逻辑；等级与运行成功／失败分别显示。
+
+打开“重点视图”后，核心与关键逻辑突出显示，普通节点淡化并保留连线。选中节点后使用“聚焦节点”查看它及直接关联，返回总览恢复全图阅读。这些操作只改变视图，不改节点契约或测试证据。
 
 画布编辑保存在浏览器草稿中，“保存到项目”才写入功能图。需求编辑直接保存到需求文件；新节点应先保存到项目，再关联需求。保存发现项目图已被其他操作修改时会提示冲突。JSON 导入、导出可用于交换和保留草稿。
 
@@ -176,11 +182,13 @@ npm run test:adapters  # 多语言一致性与 HTTP 测试
 | 功能图、需求与确认 | `contracts/` |
 | 节点／需求保存与追踪视图 | `server/traceability.mjs` |
 | Sphinx 构建、索引读取和引用规范化 | `server/needs-index.mjs`、`scripts/build-index.mjs` |
-| 已接入能力与实际测试报告 | `server/capabilities.mjs` |
+| 功能来源、可信路由与能力登记 | `server/feature-registry.mjs`、`features/*/server.mjs` |
+| 实际测试报告与有效性 | `server/capabilities.mjs` |
 | 平均值与共享数字逻辑 | `server/average.mjs`、`server/numeric-values.mjs` |
 | 原计算能力 | `server/calculator.mjs`、`server/sum.mjs`、`server/expression.mjs` |
-| 交互界面与节点面板 | `src/App.tsx`、`src/NodeProperties.tsx`、`src/CapabilityPanel.tsx` |
-| 节点说明与开发任务生成 | `src/node-context.mjs` |
+| 工作台与节点面板 | `src/App.tsx`、`src/NodeProperties.tsx`、`src/CapabilityPanel.tsx` |
+| 业务前端操作 | `features/*/client.tsx` |
+| 节点上下文、说明与开发任务生成 | `server/node-context.mjs`；直接依赖整理见 `src/node-context.mjs` |
 | 本地 API 与编辑器打开 | `server/api.mjs`、`server/editor.mjs` |
 | 多语言能力 | `server/adapters/` |
 | Codex 工作方法 | `.agents/skills/contract-studio/SKILL.md` |

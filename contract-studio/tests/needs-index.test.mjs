@@ -13,10 +13,11 @@ const python=path.join(project,process.platform==='win32'?'.venv/Scripts/python.
 async function fixture(t,{configured=false}={}) {
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'studio-index-'));
   t.after(()=>fs.rm(root,{recursive:true,force:true}));
-  for(const dir of ['contracts','src','server','tests','traceability','server/adapters/impl/java','server/adapters/impl/php','server/adapters/impl/cpp'])await fs.mkdir(path.join(root,dir),{recursive:true});
+  for(const dir of ['contracts','src','features/demo','server','tests','traceability','server/adapters/impl/java','server/adapters/impl/php','server/adapters/impl/cpp'])await fs.mkdir(path.join(root,dir),{recursive:true});
   await fs.writeFile(path.join(root,'contracts/requirements.json'),JSON.stringify({version:1,featureId:'demo',requirements:[{id:'REQ_ONE',nodeId:'one',title:'原需求',description:'原描述',status:'draft',revision:1}]}));
   await fs.writeFile(path.join(root,'contracts/feedback.json'),JSON.stringify({version:2,feature:{id:'demo',title:'示例',goal:'验证'},nodes:[{id:'one',title:'功能一',input:'In',output:'Out',parentId:null,position:{x:0,y:0}},{id:'two',title:'功能二',input:'In',output:'Out',parentId:'one',position:{x:10,y:0}}],edges:[{id:'e',source:'one',target:'two',sourceHandle:'ok',label:'有效'}]}));
   await fs.writeFile(path.join(root,'src/demo.ts'),'// @need-ids: REQ_ONE\nexport const value=1;\n');
+  await fs.writeFile(path.join(root,'features/demo/client.tsx'),'// @need-ids: REQ_ONE\nexport function Demo(){return null;}\n');
   await fs.writeFile(path.join(root,'tests/demo.mjs'),'// @need-ids: REQ_ONE\n');
   await fs.writeFile(path.join(root,'server/adapters/impl/java/Demo.java'),'// @need-ids: REQ_ONE\n');
   await fs.writeFile(path.join(root,'server/adapters/impl/php/demo.php'),'// @need-ids: REQ_ONE\n');
@@ -29,7 +30,7 @@ async function fixture(t,{configured=false}={}) {
     // Keep configured project names but make missing language directories explicit.
     await fs.writeFile(path.join(root,'traceability/ubproject.toml'),config);
     for(const name of ['python','go','rust','csharp'])await fs.mkdir(path.join(root,'server/adapters/impl',name),{recursive:true});
-    await fs.writeFile(path.join(root,'traceability/index.rst'),'Index\n=====\n\n.. toctree::\n\n   requirements\n\n'+['frontend','backend','tests','cpp','python','go','rust','csharp'].map(name=>`.. src-trace::\n   :project: ${name}\n`).join('\n'));
+    await fs.writeFile(path.join(root,'traceability/index.rst'),'Index\n=====\n\n.. toctree::\n\n   requirements\n\n'+['frontend','features','backend','tests','cpp','python','go','rust','csharp'].map(name=>`.. src-trace::\n   :project: ${name}\n`).join('\n'));
   }
   await exportNeeds(root);
   return root;
@@ -77,7 +78,7 @@ test('真实 Sphinx 构建统一需求关系、多 CodeLinks 引用与 Java/PHP 
   assert.equal(needs.FUNC_74776F.importance,'normal');
   assert.equal(needs.REQ_ONE.importance,null); // Field belongs to spec nodes, not requirement confirmation.
   const req=built.requirements[0];
-  for(const file of ['src/demo.ts','server/adapters/impl/cpp/demo.cpp'])assert.ok(req.code.some(ref=>ref.path===file&&ref.source==='sphinx-codelinks'),file);
+  for(const file of ['src/demo.ts','features/demo/client.tsx','server/adapters/impl/cpp/demo.cpp'])assert.ok(req.code.some(ref=>ref.path===file&&ref.source==='sphinx-codelinks'),file);
   assert.ok(req.tests.some(ref=>ref.path==='tests/demo.mjs'&&ref.source==='sphinx-codelinks'));
   for(const file of ['server/adapters/impl/java/Demo.java','server/adapters/impl/php/demo.php'])assert.ok(req.code.some(ref=>ref.path===file&&ref.source==='local-marker'),file);
   assert.match((await sourceAt('server/adapters/impl/cpp/demo.cpp',1,root)).excerpt,/int demo/);

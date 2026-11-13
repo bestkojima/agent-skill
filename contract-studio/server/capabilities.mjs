@@ -3,47 +3,24 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
+import { featureRegistry } from './feature-registry.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const calculatorFrontend = mode => ({ component: 'ExpressionCalculator', path: 'src/App.tsx', mode });
-// Reviewed project capabilities, never commands supplied by the diagram or browser.
-const registry = [
-  { id:'calculator.calculate', title:'两数四则运算', rootNodeId:'calculator',
-    nodeIds:['calculator','calc-input','calc-validate','calc-compute','calc-result'],
-    runPath:'/api/calculator', testPath:'/api/calculator/test', frontend:calculatorFrontend('calculator'),
-    implementation:[{path:'server/calculator.mjs',symbol:'runCalculation'}],
-    testFiles:['tests/calculator.test.mjs','tests/calculator-input.test.mjs'],
-    requirementIds:['REQ_CALC_ALL','REQ_CALC_INPUT','REQ_CALC_VALIDATE','REQ_CALC_COMPUTE','REQ_CALC_RESULT'] },
-  { id:'sum.calculate', title:'多数字求和', rootNodeId:'sum',
-    nodeIds:['sum','sum-input','sum-validate','sum-accumulate','sum-result'],
-    runPath:'/api/sum', testPath:'/api/sum/test', frontend:calculatorFrontend('sum'),
-    implementation:[{path:'server/sum.mjs',symbol:'runSum'}],
-    testFiles:['tests/sum.test.mjs','tests/calculator-input.test.mjs'],
-    requirementIds:['REQ_SUM_ALL','REQ_SUM_INPUT','REQ_SUM_VALIDATE','REQ_SUM_ACCUMULATE','REQ_SUM_RESULT'] },
-  { id:'expression.calculate', title:'混合四则运算', rootNodeId:'expression',
-    nodeIds:['expression','expr-input','expr-compute','expr-tokenize','expr-parse','expr-evaluate','expr-result'],
-    runPath:'/api/expression', testPath:'/api/expression/test', frontend:calculatorFrontend('expression'),
-    implementation:[{path:'server/expression.mjs',symbol:'runExpression'},{path:'server/expression.mjs',symbol:'runExpressionCompute'}],
-    testFiles:['tests/expression.test.mjs','tests/calculator-input.test.mjs'],
-    requirementIds:['REQ_EXPR_ALL','REQ_EXPR_INPUT','REQ_EXPR_COMPUTE','REQ_EXPR_TOKENIZE','REQ_EXPR_PARSE','REQ_EXPR_EVALUATE','REQ_EXPR_RESULT'] },
-  { id:'average.calculate', title:'平均值', rootNodeId:'average',
-    nodeIds:['average','avg-validate','avg-accumulate','avg-compute'],
-    runPath:'/api/average', testPath:'/api/average/test', frontend:calculatorFrontend('average'),
-    implementation:[{path:'server/average.mjs',symbol:'runAverage'},{path:'server/average.mjs',symbol:'validateAverageInput'},
-      {path:'server/average.mjs',symbol:'accumulateAverage'},{path:'server/average.mjs',symbol:'computeAverage'}],
-    testFiles:['tests/average.test.mjs','tests/average-api.test.mjs','tests/calculator-input.test.mjs'],
-    requirementIds:['REQ_AVERAGE_ALL','REQ_AVERAGE_VALIDATE','REQ_AVERAGE_ACCUMULATE','REQ_AVERAGE_COMPUTE'] },
-  { id:'feedback.submit', title:'反馈工单', rootNodeId:'submit',
-    nodeIds:['submit','form','validate','lookup','save','view'],
-    runPath:'/api/submit', testPath:'/api/test', frontend:{component:'FeedbackPreview',path:'src/App.tsx',mode:'feedback'},
-    implementation:[{path:'server/domain.mjs',symbol:'runSubmission'}], testFiles:['tests/domain.test.mjs'],
-    requirementIds:['REQ_FEEDBACK_SUBMIT','REQ_FEEDBACK_FORM','REQ_FEEDBACK_VALIDATE','REQ_FEEDBACK_LOOKUP','REQ_FEEDBACK_SAVE','REQ_FEEDBACK_VIEW'] }
-];
+// Reviewed project declarations; diagrams cannot register executable commands.
+const registry = featureRegistry.capabilities;
 export function listCapabilities() { return structuredClone(registry); }
 function capability(id) {
   const found = registry.find(item => item.id === id);
   if (!found) throw new Error('未知的功能能力');
   return found;
+}
+
+// Saved evidence and draft previews inspect the same capability-owned contract.
+export function capabilityGraphContract(graph, cap) {
+  const nodes=graph.nodes.filter(node=>cap.nodeIds.includes(node.id)||node.capabilityId===cap.id)
+    .map(({position,size,importance,...node})=>node);
+  const ids=new Set(nodes.map(node=>node.id));
+  return {nodes,edges:graph.edges?.filter(edge=>ids.has(edge.source)||ids.has(edge.target))};
 }
 
 async function filesUnder(root, dir) {
@@ -62,7 +39,7 @@ async function filesUnder(root, dir) {
 // Metadata tracks the actual candidate without storing source code or hashing files.
 async function candidate(root, cap) {
   const relevant = new Set([...cap.testFiles,'server/api.mjs','server/capabilities.mjs',
-    ...await filesUnder(root,'src'), ...cap.implementation.map(ref=>ref.path),
+    ...await filesUnder(root,'src'), ...await filesUnder(root,'features'), ...cap.implementation.map(ref=>ref.path),
     ...await filesUnder(root,'server').then(files=>files.filter(file=>!file.startsWith('server/adapters/')))]);
   const files = [];
   for (const file of [...relevant].sort()) {
@@ -77,9 +54,8 @@ async function candidate(root, cap) {
         contracts.push({file,id:req.id,title:req.title,description:req.description,nodeIds:req.nodeIds??[req.nodeId],acceptance:req.acceptance??[]});
       }
     } else if (Array.isArray(value.nodes)) {
-      const nodes=value.nodes.filter(node=>cap.nodeIds.includes(node.id)||node.capabilityId===cap.id).map(({position,size,importance,...node})=>node);
-      const ids=new Set(nodes.map(node=>node.id));
-      if (nodes.length) contracts.push({file,nodes,edges:value.edges?.filter(edge=>ids.has(edge.source)||ids.has(edge.target))});
+      const contract=capabilityGraphContract(value,cap);
+      if (contract.nodes.length) contracts.push({file,...contract});
     }
   }
   return {files,contracts};
