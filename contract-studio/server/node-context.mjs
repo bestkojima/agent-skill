@@ -1,13 +1,11 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
-import { traceability, validateGraph, TraceError } from './traceability.mjs';
-import { indexedCapabilities, capabilityEvidence, capabilityGraphContract } from './capabilities.mjs';
-import { readNeedsIndex } from './needs-index.mjs';
+import { openTraceability, TraceError } from './traceability.mjs';
+import { capabilityEvidence, capabilityGraphContract } from './capabilities.mjs';
 import { describeNodeContext } from '../src/node-context.mjs';
 import { nodeImportance } from '../src/node-importance.mjs';
-import { backendRelations, nodeBackend } from './backend-relations.mjs';
-import { featureRegistry } from './feature-registry.mjs';
+import { nodeBackend } from './backend-relations.mjs';
 import { nodeProperties } from './needs-projection.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -100,8 +98,10 @@ function formatDocument(context) {
 // Read-only snapshots for the workbench, document export and the current Agent.
 export async function nodeContext({featureId,nodeId,graph:preview} = {}, root = projectRoot) {
   if (typeof nodeId !== 'string' || !nodeId) throw new TraceError('缺少节点 ID');
-  const saved = await traceability(root,featureId);
-  const graph = preview === undefined ? saved.projectGraph : validateGraph(preview,saved.featureId);
+  const project=await openTraceability(root);
+  const saved=await project.feature(featureId);
+  const view=preview===undefined?saved:await project.feature(featureId,{graph:preview});
+  const graph=view.projectGraph;
   const nodes = new Map(graph.nodes.map(node=>[node.id,normalizeNode(node)]));
   const node = nodes.get(nodeId);
   if (!node) throw new TraceError(`未找到节点：${nodeId}`,404);
@@ -112,23 +112,20 @@ export async function nodeContext({featureId,nodeId,graph:preview} = {}, root = 
   const children = [...nodes.values()].filter(item=>item.parentId===nodeId);
   const childIds = new Set(children.map(item=>item.id));
   const requirements = saved.requirements.filter(requirement=>(requirement.nodeIds??[requirement.nodeId]).includes(nodeId));
-  const capabilities = await indexedCapabilities(root);
+  const capabilities=project.capabilities();
   const capability = (node.capabilityId ? capabilities.find(item=>item.id===node.capabilityId) : capabilities.find(item=>item.nodeIds.includes(nodeId))) ?? null;
   const draft = !isDeepStrictEqual(graph,saved.projectGraph);
   const semanticChanges = draft && !isDeepStrictEqual(semanticGraph(graph),semanticGraph(saved.projectGraph));
   const evidenceContractChanges = Boolean(capability) && draft && !isDeepStrictEqual(
     capabilityGraphContract(graph,capability),capabilityGraphContract(saved.projectGraph,capability));
-  const savedEvidence = capability ? evidenceSummary(await capabilityEvidence(capability.id,root)) : null;
+  const savedEvidence = capability ? evidenceSummary(await capabilityEvidence(capability.id,root,project)) : null;
   const evidence = savedEvidence && evidenceContractChanges ? {...savedEvidence,
     state:savedEvidence.state==='not-run'?'not-run':'stale',
     cases:savedEvidence.cases?.map(test=>test.state==='not-run'?test:{...test,observedState:test.observedState??test.state,state:'stale'}),
     coversCurrentGraph:false,
     message:'当前草稿中该能力的行为契约已变化；项目测试记录尚未覆盖这份草稿。'
   } : savedEvidence ? {...savedEvidence,coversCurrentGraph:savedEvidence.state==='passed'} : null;
-  const indexed=draft?await readNeedsIndex(root):null;
-  const relations=draft?backendRelations(graph,saved.requirements,{feature:featureRegistry.resolveFeature(saved.featureId),
-    needs:indexed.needs,entities:indexed.entities}):saved.backend;
-  const backend=nodeBackend(relations,nodeId,evidence);
+  const backend=nodeBackend(view.backend,nodeId,evidence);
   const context = {
     feature:graph.feature,node,properties:nodeProperties(node),parent:ancestors.at(-1)??null,ancestors,incoming,outgoing,children,
     internalEdges:graph.edges.filter(edge=>childIds.has(edge.source)&&childIds.has(edge.target)),

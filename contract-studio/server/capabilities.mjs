@@ -4,16 +4,14 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { featureRegistry } from './feature-registry.mjs';
-import { readNeedsIndex } from './needs-index.mjs';
-import { indexedCapabilityBindings } from './backend-relations.mjs';
+import { openTraceability } from './traceability.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // Reviewed project declarations; diagrams cannot register executable commands.
 const registry = featureRegistry.capabilities;
 export function listCapabilities() { return structuredClone(registry).map(cap=>({...cap,implementation:[],requirementIds:[]})); }
 export async function indexedCapabilities(root=projectRoot) {
-  const {index,needs,entities}=await readNeedsIndex(root);
-  return listCapabilities().map(cap=>({...cap,...indexedCapabilityBindings(cap,needs,entities),indexState:index.state}));
+  return (await openTraceability(root)).capabilities();
 }
 function capability(id) {
   const found = registry.find(item => item.id === id);
@@ -43,9 +41,9 @@ async function filesUnder(root, dir) {
 }
 
 // Metadata tracks the actual candidate without storing source code or hashing files.
-async function candidate(root, cap, snapshot) {
-  snapshot??=await readNeedsIndex(root);
-  const binding=indexedCapabilityBindings(cap,snapshot.needs,snapshot.entities);
+async function candidate(root, cap, project) {
+  project??=await openTraceability(root);
+  const binding=project.capabilities().find(item=>item.id===cap.id);
   const relevant = new Set([...cap.testFiles,'server/api.mjs','server/capabilities.mjs','scripts/test-case-reporter.mjs',
     ...await filesUnder(root,'src'), ...await filesUnder(root,'features'), ...binding.implementation.map(ref=>ref.path),
     ...await filesUnder(root,'server').then(files=>files.filter(file=>!file.startsWith('server/adapters/')))]);
@@ -72,20 +70,9 @@ async function candidate(root, cap, snapshot) {
       contracts.push({file,id:req.id,title:req.title,description:req.description,nodeIds:req.nodeIds??[req.nodeId],acceptance:req.acceptance??[]});
     }
   }
-  // Native Needs documents participate through their semantic content; layout and
-  // importance stay outside evidence. An out-of-date index cannot certify them.
-  const specifications=Object.values(snapshot.needs).filter(need=>need.type==='spec'&&
-    (nodeIds.has(need.node_id??need.id)||JSON.parse(need.node_properties||'{}').capabilityId===cap.id))
-    .map(need=>{
-      const {position,size,importance,...properties}=JSON.parse(need.node_properties||'{}');
-      return {id:need.id,title:need.title,...(need.contract_source?{}:{content:need.content}),properties,fulfills:need.fulfills??[],contains:need.contains??[],parent:need.parent_spec??[],flowsTo:need.flows_to??[],edges:need.node_edges??null};
-    });
-  const requirements=[...requirementIds].filter(id=>snapshot.needs[id]).sort().map(id=>{
-    const need=snapshot.needs[id];return {id,title:need.title,content:need.content,parts:need.parts};
-  });
-  return {files,contracts,specifications,requirements,
+  return {files,contracts,...project.capabilityContract(cap.id),
     testCases:binding.testCases.map(({id,file,files,name,verifies})=>({id,file,files,name,verifies})),
-    indexReady:['current','unconfigured'].includes(snapshot.index.state)};
+    indexReady:['current','unconfigured'].includes(project.index.state)};
 }
 const reportPath = (root,id) => path.join(root,'traceability','_build','test-results',`${id}.json`);
 function publicReport(report) { const {candidate: _candidate,...result}=report; return result; }
@@ -132,11 +119,11 @@ function currentCases(declarations,cap,root,previous) {
     return {...item,state,observedState,line,durationMs,message};
   });
 }
-export async function capabilityEvidence(id, root=projectRoot) {
+export async function capabilityEvidence(id, root=projectRoot, project) {
   const cap=capability(id);
-  const snapshot=await readNeedsIndex(root);
-  const declarations=indexedCapabilityBindings(cap,snapshot.needs,snapshot.entities).testCases;
-  const caseIndex={state:snapshot.index.state,source:snapshot.index.source};
+  project??=await openTraceability(root);
+  const declarations=project.capabilities().find(item=>item.id===id).testCases;
+  const caseIndex={state:project.index.state,source:project.index.source};
   let report;
   try { report=JSON.parse(await fs.readFile(reportPath(root,id),'utf8')); }
   catch (error) {
@@ -147,8 +134,8 @@ export async function capabilityEvidence(id, root=projectRoot) {
     throw error;
   }
   report.cases??=caseResults(declarations,cap,root);
-  const unindexed=!['current','unconfigured'].includes(snapshot.index.state);
-  if (unindexed || !isDeepStrictEqual(report.candidate,await candidate(root,cap,snapshot))) {
+  const unindexed=!['current','unconfigured'].includes(project.index.state);
+  if (unindexed || !isDeepStrictEqual(report.candidate,await candidate(root,cap,project))) {
     const cases=staleCases(currentCases(declarations,cap,root,report.cases));
     return {...publicReport(report),state:'stale',cases,caseIndex,caseCoverage:caseCoverage(cases,caseIndex),message:'相关代码、行为契约或需求索引已变化，请重建索引后重新运行测试'};
   }
@@ -178,9 +165,9 @@ export async function runCapabilityTests(id, root=projectRoot) {
   const key=`${root}:${id}`;
   if(active.has(key)) return active.get(key);
   const job=(async()=>{
-    const snapshot=await readNeedsIndex(root);
-    const declarations=indexedCapabilityBindings(cap,snapshot.needs,snapshot.entities).testCases;
-    const before=await candidate(root,cap,snapshot);
+    const project=await openTraceability(root);
+    const declarations=project.capabilities().find(item=>item.id===id).testCases;
+    const before=await candidate(root,cap,project);
     const startedAt=new Date().toISOString(), start=performance.now();
     const file=reportPath(root,id);
     await fs.mkdir(path.dirname(file),{recursive:true});
@@ -193,12 +180,12 @@ export async function runCapabilityTests(id, root=projectRoot) {
       catch (error) { result.message=[result.message,`逐用例报告读取失败：${error.message}`].filter(Boolean).join('；'); }
     }
     const changed=!isDeepStrictEqual(before,await candidate(root,cap));
-    const unindexed=!['current','unconfigured'].includes(snapshot.index.state);
+    const unindexed=!['current','unconfigured'].includes(project.index.state);
     const passed=Number(result.output.match(/^# pass (\d+)\s*$/m)?.[1]??0);
     const failed=Number(result.output.match(/^# fail (\d+)\s*$/m)?.[1]??0);
     const observed=caseResults(declarations,cap,root,events);
     const cases=changed||unindexed?staleCases(observed):observed;
-    const caseIndex={state:snapshot.index.state,source:snapshot.index.source};
+    const caseIndex={state:project.index.state,source:project.index.source};
     const coverage=caseCoverage(cases,caseIndex);
     const executionState=result.exitCode===0&&passed>0&&failed===0?'passed':'failed';
     const report={capabilityId:id,state:changed||unindexed?'stale':executionState,executionState,

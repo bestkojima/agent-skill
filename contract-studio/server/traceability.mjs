@@ -5,8 +5,9 @@ import { isDeepStrictEqual } from 'node:util';
 import { readNeedsIndex, buildNeedsIndex, indexConfigured } from './needs-index.mjs';
 import { nodeImportance } from '../src/node-importance.mjs';
 import { featureRegistry } from './feature-registry.mjs';
-import { backendRelations, nodeNeedId, acceptancePartId } from './backend-relations.mjs';
+import { backendRelations, nodeNeedId, acceptancePartId, indexedCapabilityBindings, entitySpecIds } from './backend-relations.mjs';
 import { mappingRules, nodeProperties, projectNeedsGraph, projectedRequirements, saveProjectedGraph, updateNeedSource } from './needs-projection.mjs';
+import { normalizeNeeds, defaultMappingRules } from './needs-schema.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 function featureConfig(featureId) {
@@ -214,49 +215,133 @@ async function combinedRequirements(root, feature) {
   return {...own, requirements: [...own.requirements, ...sources.flat()]};
 }
 
-export async function traceability(root = projectRoot, featureId) {
-  const feature = featureConfig(featureId);
-  const data = await combinedRequirements(root, feature);
-  if (featureId !== undefined && data.featureId !== featureId) throw new TraceError('需求文件的功能 ID 不匹配');
-  const sourceGraph = await loadGraph(root, data.featureId, feature);
-  const {index, needs, refs, entities=[]} = await readNeedsIndex(root);
-  let sphinxState = 'missing';
-  try { sphinxState = (await fs.readFile(path.join(root, feature.rstFile), 'utf8')) === rstText(data, sourceGraph, feature) ? 'current' : 'outdated'; }
-  catch (e) { if (e.code !== 'ENOENT') throw e; }
-  let indexSourcesCurrent=sphinxState==='current';
-  if(index.state==='current' && indexSourcesCurrent && feature.requirementSources?.length) {
-    for(const sourceId of feature.requirementSources) {
-      const sourceFeature=featureConfig(sourceId);
-      const sourceData=await loadRequirements(root,sourceFeature);
-      const sourceGraph=await loadGraph(root,sourceId,sourceFeature);
-      try { if(await fs.readFile(path.join(root,sourceFeature.rstFile),'utf8')!==rstText(sourceData,sourceGraph,sourceFeature))indexSourcesCurrent=false; }
-      catch(e) { if(e.code==='ENOENT')indexSourcesCurrent=false;else throw e; }
+// One request owns one interpretation of the source/index pair. Consumers query
+// functional views, capabilities and source; they never assemble parser records.
+export async function openTraceability(root = projectRoot) {
+  const raw = await readNeedsIndex(root);
+  const index = {...raw.index};
+  const sources = new Map();
+  const graphs = new Map();
+  async function sourceGraph(feature) {
+    if(!graphs.has(feature.graphFile))graphs.set(feature.graphFile,fs.readFile(path.join(root,feature.graphFile),'utf8').then(JSON.parse));
+    return graphs.get(feature.graphFile);
+  }
+  async function sourceRecord(feature) {
+    if (!sources.has(feature.id)) sources.set(feature.id,(async()=>{
+      const data=await combinedRequirements(root,feature);
+      const graph=await sourceGraph(feature);
+      validateGraph(graph,data.featureId,Object.keys(graph._needsLayout??{}));
+      let state='missing';
+      try { state=await fs.readFile(path.join(root,feature.rstFile),'utf8')===rstText(data,graph,feature)?'current':'outdated'; }
+      catch(error) { if(error.code!=='ENOENT')throw error; }
+      return {data,graph,state};
+    })());
+    return sources.get(feature.id);
+  }
+  // A successful build of old RST cannot certify newer JSON. This check applies
+  // equally to source navigation, capability evidence and graph/draft queries.
+  if(index.state==='current')for(const feature of featureRegistry.features) {
+    try { await fs.access(path.join(root,feature.graphFile));await fs.access(path.join(root,feature.requirementFile)); }
+    catch(error) { if(error.code==='ENOENT')continue;throw error; }
+    if((await sourceRecord(feature)).state!=='current') {
+      index.state='stale';index.message='需求源与 RST 未同步，索引尚未包含当前源内容。';
     }
   }
-  if(index.state==='current'&&!indexSourcesCurrent) {
-    index.state='stale';index.message='需求源与 RST 未同步，索引尚未包含当前源内容。';
+  const needs=normalizeNeeds(raw.needs,await mappingRules(root));
+  const entities=raw.entities.map(entity=>({...entity,indexState:index.state}));
+  const refs=new Map([...raw.refs].map(([id,items])=>[id,items.map(ref=>{
+    if(ref.source!=='sphinx-codelinks'||index.state==='current')return ref;
+    const {scope,...location}=ref;return {...location,indexState:index.state};
+  })]));
+  const capabilities=structuredClone(featureRegistry.capabilities).map(cap=>({...cap,
+    ...indexedCapabilityBindings(cap,needs,entities),indexState:index.state}));
+  const views=new Map();
+
+  async function graphView(feature) {
+    const graph=await sourceGraph(feature);
+    const graphNeeds=index.state==='current'?needs:Object.fromEntries(Object.entries(needs).filter(([,need])=>!graph.nodes.some(node=>nodeNeedId(node.id,feature)===need.id)));
+    return projectNeedsGraph(graph,graphNeeds,feature,defaultMappingRules,entities,refs);
   }
-  const rules=await mappingRules(root);
-  const graphNeeds=index.state==='current'?needs:Object.fromEntries(Object.entries(needs).filter(([,need])=>!sourceGraph.nodes.some(node=>nodeNeedId(node.id,feature)===need.id)));
-  const graph=projectNeedsGraph(sourceGraph,graphNeeds,feature,rules,entities,refs);
-  if(index.state==='current')validateGraph(graph,data.featureId);
-  const requirements=projectedRequirements(data.requirements,graph,needs,rules);
-  const backend=backendRelations(graph,requirements,{feature,needs,entities:entities.map(entity=>({...entity,indexState:index.state}))});
-  const relations = Object.values(needs).filter(need => need.type === 'spec').map(need => ({id:need.id,title:need.title,importance:nodeImportance(need.importance),fulfills:need.fulfills??[],contains:need.contains??[],flowsTo:need.flows_to??[]}));
-  const requirementRefs=id=>{
-    const related=backend.functions.filter(fn=>fn.requirementIds.includes(id));
-    const tests=backend.testCases.filter(test=>test.verifies.some(link=>link.requirementId===id));
-    const implementation=related.flatMap(fn=>fn.needIds.flatMap(id=>refs.get(id)??[]).filter(ref=>ref.path===fn.path&&fn.markerLines.includes(ref.line)));
-    const found=[...(refs.get(id)??[]),...implementation,...tests.flatMap(test=>refs.get(test.id)??[])];
-    return [...new Map(found.map(ref=>[`${ref.path}:${ref.line}`,ref])).values()];
-  };
-  return { featureId: data.featureId, source: feature.requirementFile, projectGraph: graph, sphinx: { path: feature.rstFile, state: sphinxState }, index, relations, backend,
-    ubcode: {state:'not-connected',message:'未接入（可选）'},
-    requirements: requirements.map(r => ({ ...r,
-      ...(index.state === 'current' && needs[r.id] && !r.sourceDocument ? {title:needs[r.id].title,description:r.description,status:needs[r.id].status} : {}),
-      nodeIds:nodeIdsOf(r), acceptance:acceptanceOf(r), acceptanceStatus:r.acceptanceStatus??'draft',
-      code: requirementRefs(r.id).filter(ref => !ref.path.startsWith('tests/')),
-      tests: requirementRefs(r.id).filter(ref => ref.path.startsWith('tests/')) })) };
+
+  async function featureView(featureId,{graph:preview}={}) {
+    const feature=featureConfig(featureId);
+    if(!views.has(feature.id))views.set(feature.id,(async()=>{
+      const {data,state}=await sourceRecord(feature);
+      const graph=await graphView(feature);
+      if(index.state==='current')validateGraph(graph,data.featureId);
+      const requirements=projectedRequirements(data.requirements,graph,needs,defaultMappingRules);
+      const backend=backendRelations(graph,requirements,{feature,needs,entities});
+      const requirementRefs=id=>{
+        const related=backend.functions.filter(fn=>fn.requirementIds.includes(id));
+        const tests=backend.testCases.filter(test=>test.verifies.some(link=>link.requirementId===id));
+        const implementation=related.flatMap(fn=>fn.needIds.flatMap(id=>refs.get(id)??[]).filter(ref=>ref.path===fn.path&&fn.markerLines.includes(ref.line)));
+        const found=[...(refs.get(id)??[]),...implementation,...tests.flatMap(test=>refs.get(test.id)??[])];
+        return [...new Map(found.map(ref=>[`${ref.path}:${ref.line}`,ref])).values()];
+      };
+      return {featureId:data.featureId,source:feature.requirementFile,projectGraph:graph,sphinx:{path:feature.rstFile,state},index,backend,
+        relations:Object.values(needs).filter(need=>need.type==='spec').map(need=>({id:need.id,title:need.title,importance:nodeImportance(need.importance),fulfills:need.fulfills??[],contains:need.contains??[],flowsTo:need.flows_to??[]})),
+        ubcode:{state:'not-connected',message:'未接入（可选）'},
+        requirements:requirements.map(r=>({...r,
+          ...(index.state==='current'&&needs[r.id]&&!r.sourceDocument?{title:needs[r.id].title,status:needs[r.id].status}:{}),
+          nodeIds:nodeIdsOf(r),acceptance:acceptanceOf(r),acceptanceStatus:r.acceptanceStatus??'draft',
+          code:requirementRefs(r.id).filter(ref=>!ref.path.startsWith('tests/')),
+          tests:requirementRefs(r.id).filter(ref=>ref.path.startsWith('tests/'))}))};
+    })());
+    const saved=await views.get(feature.id);
+    if(featureId!==undefined&&saved.featureId!==featureId)throw new TraceError('需求文件的功能 ID 不匹配');
+    if(preview===undefined)return saved;
+    const graph=validateGraph(preview,saved.featureId);
+    return {...saved,projectGraph:graph,backend:backendRelations(graph,saved.requirements,{feature,needs,entities})};
+  }
+
+  function capabilityContract(id) {
+    const binding=capabilities.find(cap=>cap.id===id);
+    if(!binding)throw new TraceError('未知的功能能力');
+    const specifications=Object.values(needs).filter(need=>need.type==='spec'&&(
+      binding.nodeIds.includes(need.node_id||need.id)||JSON.parse(need.node_properties||'{}').capabilityId===id))
+      .map(need=>{
+        const {position,size,importance,...properties}=JSON.parse(need.node_properties||'{}');
+        return {id:need.id,title:need.title,...(need.contract_source?{}:{content:need.content}),properties,
+          fulfills:need.fulfills??[],contains:need.contains??[],parent:need.parent_spec??[],flowsTo:need.flows_to??[],edges:need.node_edges??null};
+      });
+    const requirements=[...binding.requirementIds].sort().filter(id=>needs[id]).map(id=>{
+      const need=needs[id];return {id,title:need.title,content:need.content,parts:need.parts};
+    });
+    return {specifications,requirements};
+  }
+
+  async function source({nodeId,path:referencePath,line}={}) {
+    if(nodeId===undefined) {
+      if(typeof referencePath!=='string'||!Number.isInteger(line)||line<1)throw new TraceError('Invalid source reference');
+      if(![...refs.values()].flat().some(ref=>ref.path===referencePath&&ref.line===line))throw new TraceError('Source reference not found',404);
+      const lines=(await fs.readFile(path.join(root,referencePath),'utf8')).split(/\r?\n/);
+      const startLine=Math.max(1,line-3);
+      return {path:referencePath,startLine,excerpt:lines.slice(startLine-1,Math.min(lines.length,line+18)).join('\n')};
+    }
+    if(typeof nodeId!=='string'||!nodeId||index.state!=='current')return null;
+    const possibleIds=new Set([nodeId,...featureRegistry.features.map(feature=>nodeNeedId(nodeId,feature))]);
+    const specs=Object.values(needs).filter(need=>need.type==='spec'&&(need.node_id===nodeId||possibleIds.has(need.id)));
+    const ids=new Set(specs.map(need=>need.id));
+    let candidates=entities.filter(entity=>entity.symbol&&entitySpecIds(entity,needs).some(id=>ids.has(id)));
+    let relationSource='spec-marker';
+    if(!candidates.length) {
+      const requirements=new Set(specs.flatMap(need=>need.fulfills??[]));
+      candidates=entities.filter(entity=>entity.symbol&&!entity.path.startsWith('tests/')&&entity.needIds.some(id=>requirements.has(id)));
+      if(candidates.length!==1)return null;
+      relationSource='requirement-reference';
+    }
+    const unique=[...new Map(candidates.map(entity=>[`${entity.path}:${entity.startLine}:${entity.endLine}`,entity])).values()];
+    const entity=unique[0];
+    const text=await fs.readFile(path.join(root,entity.path),'utf8');
+    return {symbol:entity.symbol,file:entity.path,startLine:entity.startLine,endLine:entity.endLine,relationSource,
+      excerpt:text.split(/\r?\n/).slice(entity.startLine-1,entity.endLine).join('\n').slice(0,4600),
+      references:unique.map(({path,symbol,startLine,endLine})=>({path,symbol,startLine,endLine}))};
+  }
+  return {index,feature:featureView,graph:graphView,capabilities:()=>capabilities,capabilityContract,source};
+}
+
+export async function traceability(root = projectRoot, featureId) {
+  return (await openTraceability(root)).feature(featureId);
 }
 
 let saveQueue = Promise.resolve();
@@ -374,13 +459,7 @@ async function persist(root, data, feature) {
 }
 
 export async function sourceAt(referencePath, line, root = projectRoot) {
-  if (typeof referencePath !== 'string' || !Number.isInteger(line) || line < 1) throw new TraceError('Invalid source reference');
-  const {refs} = await readNeedsIndex(root);
-  const found = [...refs.values()].flat().some(ref => ref.path === referencePath && ref.line === line);
-  if (!found) throw new TraceError('Source reference not found', 404);
-  const lines = (await fs.readFile(path.join(root, referencePath), 'utf8')).split(/\r?\n/);
-  const startLine = Math.max(1, line - 3);
-  return { path: referencePath, startLine, excerpt: lines.slice(startLine - 1, Math.min(lines.length, line + 18)).join('\n') };
+  return (await openTraceability(root)).source({path:referencePath,line});
 }
 
 export function isLocalRequest(req) {

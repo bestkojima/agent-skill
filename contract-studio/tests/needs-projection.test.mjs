@@ -5,10 +5,12 @@ import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildTraceabilityIndex, traceability, updateGraph, updateRequirement } from '../server/traceability.mjs';
-import { readNeedsIndex } from '../server/needs-index.mjs';
+import { buildTraceabilityIndex, traceability, updateGraph, updateRequirement, openTraceability } from '../server/traceability.mjs';
+import { readNeedsIndex, buildNeedsIndex } from '../server/needs-index.mjs';
 import { featureRegistry, featureSource } from '../server/feature-registry.mjs';
 import { readProjectedGraph } from '../server/needs-projection.mjs';
+import { indexedCapabilities } from '../server/capabilities.mjs';
+import { nodeContext } from '../server/node-context.mjs';
 
 const project=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const python=path.join(project,process.platform==='win32'?'.venv/Scripts/python.exe':'.venv/bin/python');
@@ -16,6 +18,16 @@ const integration={skip:!existsSync(python)&&'先运行 uv sync --locked 启用�
 const readJson=async(root,file)=>JSON.parse(await fs.readFile(path.join(root,file),'utf8'));
 const feature={...featureRegistry.defaultTrace,id:'demo'};
 const stockCode='// @need-ids: SPEC_STOCK_CHECK\nexport function reserveStock(quantity, requested) { return quantity - requested; }\n';
+
+test('独立图读取保留传入描述符的文件与 ID，无需登记、需求文件或 Sphinx',async t=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'studio-standalone-graph-'));
+  t.after(()=>fs.rm(root,{recursive:true,force:true}));
+  const graph={version:2,feature:{id:'standalone',title:'独立功能',goal:'按来源读取'},nodes:[
+    {id:'one',title:'独立节点',position:{x:0,y:0},input:'输入',output:'输出'}
+  ],edges:[]};
+  await fs.writeFile(path.join(root,'custom-graph.json'),JSON.stringify(graph));
+  assert.deepEqual(await readProjectedGraph(root,{id:'standalone',graphFile:'custom-graph.json'}),graph);
+});
 
 async function fixture(t) {
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'studio-projection-'));
@@ -169,4 +181,62 @@ test('JSON 与原生 RST 节点可跨来源重排父子和出边，再删除原�
   assert.equal((await readNeedsIndex(root)).needs.SPEC_STOCK_COMMIT,undefined);
   assert.doesNotMatch(await fs.readFile(path.join(root,'traceability/warehouse.rst'),'utf8'),/:id: SPEC_STOCK_COMMIT/);
   assert.equal((await traceability(root,'demo')).index.state,'current');
+});
+
+test('公共读取 Interface 统一识别旧 RST：图、能力、源码和草稿都使用同一过期状态',integration,async t=>{
+  const {root}=await fixture(t);
+  const graph=await readJson(root,'contracts/feedback.json');
+  graph.nodes[0].title='尚未导出的新名称';
+  await fs.writeFile(path.join(root,'contracts/feedback.json'),JSON.stringify(graph));
+  // Simulate an external Sphinx-only build that did not export the newer JSON.
+  assert.equal((await buildNeedsIndex(root,{python})).state,'current');
+  const project=await openTraceability(root);
+  const saved=await project.feature('demo');
+  assert.equal(project.index.state,'stale');
+  assert.equal(saved.projectGraph.nodes.find(node=>node.id==='one').title,'尚未导出的新名称');
+  assert.ok(project.capabilities().every(cap=>cap.indexState==='stale'));
+  assert.equal(await project.source({nodeId:'SPEC_STOCK_CHECK'}),null);
+  const draft=structuredClone(saved.projectGraph);
+  draft.nodes.find(node=>node.id==='SPEC_STOCK_CHECK').description='草稿中的库存职责';
+  const preview=await project.feature('demo',{graph:draft});
+  assert.ok(preview.backend.functions.every(fn=>fn.scopeState==='stale'));
+  // Existing entry points consume the same policy instead of interpreting raw index state.
+  assert.deepEqual(await readProjectedGraph(root,feature),saved.projectGraph);
+  assert.equal(await featureSource('SPEC_STOCK_CHECK',new URL('http://localhost/'),root),null);
+  assert.ok((await indexedCapabilities(root)).every(cap=>cap.indexState==='stale'));
+  const {context}=await nodeContext({featureId:'demo',nodeId:'SPEC_STOCK_CHECK',graph:draft},root);
+  assert.equal(context.index.state,'stale');assert.equal(context.implementation[0].scopeState,'stale');
+});
+
+test('项目定制字段与关系在公共 Interface 同时贯通属性、函数、能力和证据契约',integration,async t=>{
+  const {root}=await fixture(t);
+  const rules=await readJson(root,'traceability/node-mapping.json');
+  rules.properties='contract_fields';rules.links.requirements='satisfies';
+  await fs.writeFile(path.join(root,'traceability/node-mapping.json'),JSON.stringify(rules));
+  await fs.appendFile(path.join(root,'traceability/ubproject.toml'),[
+    '', '[needs.types.spec.fields.contract_fields]', 'schema = { type = "string" }',
+    '[needs.links.satisfies]', 'outgoing = "satisfies"', 'incoming = "satisfied by"', '',
+  ].join('\n'));
+  const document=path.join(root,'traceability/warehouse.rst');
+  await fs.writeFile(document,(await fs.readFile(document,'utf8')).replaceAll(':node_properties:',':contract_fields:').replaceAll(':fulfills:',':satisfies:').replace('"warehouse":"east-1"','"warehouse":"east-1","capabilityId":"average.calculate"'));
+  const built=await buildTraceabilityIndex(root,undefined,{python});
+  assert.equal(built.index.state,'current',built.index.error);
+  const project=await openTraceability(root),view=await project.feature('demo');
+  const node=view.projectGraph.nodes.find(node=>node.id==='SPEC_STOCK_CHECK');
+  assert.equal(node.warehouse,'east-1');
+  assert.equal(view.backend.nodes.find(node=>node.nodeId==='SPEC_STOCK_CHECK').requirementIds[0],'REQ_STOCK_RESERVE');
+  assert.equal(view.backend.functions.find(fn=>fn.symbol==='reserveStock').nodeIds[0],node.id);
+  const cap=project.capabilities().find(cap=>cap.id==='average.calculate');
+  assert.ok(cap.nodeIds.includes(node.id));assert.ok(cap.requirementIds.includes('REQ_STOCK_RESERVE'));
+  assert.equal(cap.implementation[0].symbol,'reserveStock');assert.equal(cap.testCases[0].id,'TEST_STOCK_RESERVE');
+  const contract=project.capabilityContract(cap.id);
+  assert.equal(contract.specifications[0].properties.warehouse,'east-1');
+  assert.equal(contract.requirements[0].id,'REQ_STOCK_RESERVE');
+  assert.equal((await project.source({nodeId:node.id})).symbol,'reserveStock');
+  // Legacy JSON remains readable beside the custom authored source.
+  assert.equal(view.projectGraph.nodes.find(node=>node.id==='one').title,'入口');
+  const updated=await saveGraph(root,view,graph=>{graph.nodes.find(node=>node.id==='SPEC_STOCK_CHECK').warehouse='west-custom';});
+  assert.equal(updated.projectGraph.nodes.find(item=>item.id===node.id).warehouse,'west-custom');
+  assert.match(await fs.readFile(document,'utf8'),/:contract_fields: .*"warehouse":"west-custom"/);
+  assert.doesNotMatch(await fs.readFile(document,'utf8'),/:node_properties:/);
 });

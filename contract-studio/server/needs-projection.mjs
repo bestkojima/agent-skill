@@ -1,21 +1,12 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import { readNeedsIndex } from './needs-index.mjs';
 import { nodeNeedId, entitySpecIds } from './backend-relations.mjs';
 import { indexedTestCases } from './indexed-tests.mjs';
-
-const defaults=JSON.parse(await fs.readFile(new URL('../traceability/node-mapping.json',import.meta.url),'utf8'));
-export async function mappingRules(root) {
-  try { return JSON.parse(await fs.readFile(path.join(root,'traceability/node-mapping.json'),'utf8')); }
-  catch(error) { if(error.code==='ENOENT')return defaults;throw error; }
-}
+import { defaultMappingRules as defaults, nodeProperties } from './needs-schema.mjs';
+export { mappingRules, nodeProperties } from './needs-schema.mjs';
 const parse=(text,fallback)=>text?JSON.parse(text):fallback;
 export const specNodeId=(need,rules=defaults)=>need[rules.id]||need.id;
-export function nodeProperties(node) {
-  const {id,title,parentId,position,size,code,test,needId,properties:ignored,...properties}=node;
-  return properties;
-}
 export function projectNeedsGraph(graph,needs,feature,rules=defaults,entities=[],refs=new Map()) {
   const specs=Object.values(needs).filter(need=>need.type===rules.type&&need[rules.feature]===graph.feature.id);
   specs.sort((a,b)=>(graph.nodes.findIndex(node=>node.id===specNodeId(a,rules))+1||Infinity)-(graph.nodes.findIndex(node=>node.id===specNodeId(b,rules))+1||Infinity));
@@ -56,11 +47,9 @@ export function projectNeedsGraph(graph,needs,feature,rules=defaults,entities=[]
 }
 
 export async function readProjectedGraph(root,feature) {
-  const graph=JSON.parse(await fs.readFile(path.join(root,feature.graphFile),'utf8'));
-  const {needs,index,entities,refs}=await readNeedsIndex(root);
-  // Legacy JSON remains the editable source even when its index is being rebuilt.
-  const filtered=index.state==='current'?needs:Object.fromEntries(Object.entries(needs).filter(([,need])=>!graph.nodes.some(node=>nodeNeedId(node.id,feature)===need.id)));
-  return projectNeedsGraph(graph,filtered,feature,await mappingRules(root),entities,refs);
+  // Retain the original module entry for existing callers; one owner interprets sources.
+  const {openTraceability}=await import('./traceability.mjs');
+  return (await openTraceability(root)).graph(feature);
 }
 
 export function projectedRequirements(original,graph,needs,rules=defaults) {

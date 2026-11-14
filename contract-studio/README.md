@@ -25,6 +25,16 @@
 
 节点上下文由框架统一生成，侧栏、导出文件和 Agent API 共用一份结果。导出仍是快照，接手时读取当前状态。草稿预览会标明来源；行为契约发生未保存修改时，已保存版本的测试结果不能覆盖该草稿。
 
+维护后端读取逻辑时，通过 `openTraceability(root)` 取得本次请求的追踪视图，再查询功能、能力或源码。例如：
+
+```js
+const project = await openTraceability(root);
+const saved = await project.feature(featureId);
+const preview = await project.feature(featureId, { graph: draftGraph });
+```
+
+这个 Module 内部处理 JSON／RST 同步、索引是否过期、字段规范化及关系投影。目录、节点上下文和证据读取复用同一对象，不再各自拼装 Needs 与 CodeLinks 记录。已有 HTTP 和 CLI 入口保持原用法；独立图读取仍接受原文件描述符，无需补建需求文件。
+
 ## 启动工作台
 
 需要 Node.js 20.19 或更新版本（推荐 22.x），完整需求索引还需要 [uv](https://docs.astral.sh/uv/)。在项目目录运行：
@@ -251,6 +261,7 @@ npm run test:adapters  # 多语言一致性与 HTTP 测试
 | --- | --- |
 | 功能图、需求与确认 | 既有 `contracts/` JSON 或手写 `traceability/*.rst` |
 | 节点／需求保存与追踪视图 | `server/traceability.mjs` |
+| 请求级追踪读取与规则规范化 | `server/traceability.mjs` 的 `openTraceability`；内部字段转换在 `server/needs-schema.mjs` |
 | Sphinx 构建、索引读取和引用规范化 | `server/needs-index.mjs`、`scripts/build-index.mjs` |
 | 规格到节点的规则与源写回 | `traceability/node-mapping.json`、`server/needs-projection.mjs` |
 | 功能来源、可信路由与能力登记 | `server/feature-registry.mjs`、`features/*/server.mjs` |
