@@ -82,6 +82,7 @@ export async function readNeedsIndex(root) {
   const index={state,source:'sphinx-needs+codelinks',path:indexPath,builtAt:saved?.builtAt??artifact?.created??null,error:saved?.state==='failed'?saved.error:undefined,sourceRevision:saved?.sourceRevision??null};
   const needs=artifact?.versions?.[artifact.current_version]?.needs??{};
   const entities=(entityArtifact?.schemaVersion===1&&Array.isArray(entityArtifact.entities)?entityArtifact.entities:[]).map(entity=>({...entity,indexState:state}));
+  const scopeOf=entity=>Object.fromEntries(['symbol','signature','startLine','endLine','kind','language'].map(key=>[key,entity[key]]));
   const refs=new Map();
   for(const [id,need] of Object.entries(needs)){
     const references=[];
@@ -93,9 +94,21 @@ export async function readNeedsIndex(root) {
         // A stale line must never open an unrelated function after source edits.
         if(marker?.[1].split(',').map(value=>value.trim()).includes(id)){
           const entity=state==='current'?entities.find(item=>item.path===ref.path&&item.markerLines.includes(ref.line)&&item.needIds.includes(id)):null;
-          const scope=entity?Object.fromEntries(['symbol','signature','startLine','endLine','kind','language'].map(key=>[key,entity[key]])):null;
+          const scope=entity?scopeOf(entity):null;
           references.push({...ref,indexState:state,...(scope?{scope}:{})});
         }
+      }
+    }
+    for(const entity of entities){
+      // Native declarations use CodeLinks' accepted source-page records, not a
+      // second comment parser or a guess based on local-url/Git-root prefixes.
+      // After edits, only a file from the successful source revision may retain
+      // its old marker location; scope identity requires a current whole index.
+      if(!saved?.sourceRevision?.[entity.path]||!isDeepStrictEqual(saved.sourceRevision[entity.path],revision[entity.path]))continue;
+      for(const declaration of entity.declarations??[]){
+        if(declaration.needId!==id)continue;
+        const ref=await normalizeCodeUrl(root,`${entity.path}#L${declaration.line}`);
+        if(ref&&!references.some(item=>item.path===ref.path&&item.line===ref.line))references.push({...ref,indexState:state,...(state==='current'?{scope:scopeOf(entity)}:{})});
       }
     }
     refs.set(id,references);

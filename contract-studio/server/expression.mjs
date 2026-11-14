@@ -2,12 +2,12 @@ function problem(position, message) {
   return { status: 'invalid', position, message: '第 ' + position + ' 位：' + message };
 }
 
-// @need-ids: REQ_EXPR_INPUT
+// @need-ids: REQ_EXPR_INPUT, FUNC_SUITE_657870722D696E707574, FUNC_657870722D696E707574
 export function captureExpressionInput(raw) {
   return { status: 'received', draft: raw && typeof raw === 'object' ? raw : {} };
 }
 
-// @need-ids: REQ_EXPR_TOKENIZE
+// @need-ids: REQ_EXPR_TOKENIZE, FUNC_SUITE_657870722D746F6B656E697A65, FUNC_657870722D746F6B656E697A65
 export function tokenizeExpression(expression) {
   if (typeof expression !== 'string' || !expression.trim()) return problem(1, '请输入表达式。');
   const tokens = [];
@@ -31,7 +31,7 @@ export function tokenizeExpression(expression) {
   return { status: 'valid', tokens };
 }
 
-// @need-ids: REQ_EXPR_PARSE
+// @need-ids: REQ_EXPR_PARSE, FUNC_SUITE_657870722D7061727365, FUNC_657870722D7061727365
 export function parseExpression(tokens) {
   if (!Array.isArray(tokens) || tokens.length === 0) return problem(1, '请输入表达式。');
   const output = [];
@@ -74,7 +74,7 @@ export function parseExpression(tokens) {
   return { status: 'valid', rpn: output };
 }
 
-// @need-ids: REQ_EXPR_EVALUATE
+// @need-ids: REQ_EXPR_EVALUATE, FUNC_SUITE_657870722D6576616C75617465, FUNC_657870722D6576616C75617465
 export function evaluateExpression(rpn) {
   const values = [];
   const steps = [];
@@ -107,7 +107,7 @@ export function evaluateExpression(rpn) {
   return { status: 'success', value: values[0], message: '计算结果：' + values[0], steps };
 }
 
-// @need-ids: REQ_EXPR_COMPUTE
+// @need-ids: REQ_EXPR_COMPUTE, FUNC_SUITE_657870722D636F6D70757465, FUNC_657870722D636F6D70757465
 export async function runExpressionCompute(raw) {
   const trace = [];
   async function stage(nodeId, input, fn) {
@@ -125,12 +125,12 @@ export async function runExpressionCompute(raw) {
   return { result, trace };
 }
 
-// @need-ids: REQ_EXPR_RESULT
+// @need-ids: REQ_EXPR_RESULT, FUNC_SUITE_657870722D726573756C74, FUNC_657870722D726573756C74
 export function expressionUi(result) {
   return { tone: result.status === 'success' ? 'success' : 'error', message: result.message };
 }
 
-// @need-ids: REQ_EXPR_ALL
+// @need-ids: REQ_EXPR_ALL, FUNC_SUITE_65787072657373696F6E, FUNC_65787072657373696F6E
 export async function runExpression(raw, mode = 'dry-run') {
   if (!['dry-run', 'sandbox'].includes(mode)) throw Error('Unknown mode');
   const startInput = performance.now();

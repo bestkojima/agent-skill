@@ -150,8 +150,73 @@ test('显式重建仅同步已存在来源，旧独立调用无需补齐其他�
   assert.equal(existsSync(path.join(root,'contracts/calculator.json')),false);
 });
 
+test('原生 CodeLinks 声明自动生成实体、验收关联和安全定位',{skip:!existsSync(python)&&'先运行 uv sync --locked 启用真实 Sphinx 集成测试'},async t=>{
+  const root=await fixture(t,{configured:true});
+  await fs.appendFile(path.join(root,'traceability/conf.py'),"\nfor _project in src_trace_projects.values():\n    _project['analyse']['get_multiline_needs'] = True\n");
+  const requirementFile=path.join(root,'contracts/requirements.json');
+  const requirements=JSON.parse(await fs.readFile(requirementFile,'utf8'));
+  requirements.requirements[0].acceptance=[{id:'AC_ONE',input:'1,2',expected:'3',observable:'求和结果'}];
+  await fs.writeFile(requirementFile,JSON.stringify(requirements));
+  await exportNeeds(root);
+  await fs.writeFile(path.join(root,'server/native.mjs'),[
+    '// @need impl: Native sum', '// :id: IMPL_NATIVE', '// :implements: FUNC_6F6E65', '// @endneed',
+    'export function nativeSum(a, b) { return a + b; }', '',
+    '// @ Native helper, IMPL_NATIVE_ONE, impl', 'export function nativeHelper() { return 1; }', '',
+  ].join('\n'));
+  const testFile=path.join(root,'tests/native.test.mjs');
+  const testSource=[
+    "import test from 'node:test';", '// @need test: Native acceptance', '// :id: TEST_NATIVE',
+    '// :verifies: REQ_ONE.AC_ONE', '// @endneed', "test('[TEST_NATIVE] adds values', () => {});", '',
+  ].join('\n');
+  await fs.writeFile(testFile,testSource);
+  let built=await buildNeedsIndex(root,{python});
+  assert.equal(built.state,'current',built.error);
+  let {needs,entities,refs}=await readNeedsIndex(root);
+  assert.deepEqual(needs.TEST_NATIVE.verifies,['REQ_ONE.AC_ONE']);
+  assert.deepEqual(needs.REQ_ONE.parts.AC_ONE.verifies_back,['TEST_NATIVE']);
+  assert.deepEqual(needs.IMPL_NATIVE.implements,['FUNC_6F6E65']);
+  const implementation=entities.find(entity=>entity.needIds.includes('IMPL_NATIVE'));
+  assert.equal(implementation.symbol,'nativeSum');
+  assert.equal(implementation.startLine,5);
+  assert.equal(implementation.endLine,5);
+  assert.deepEqual(implementation.declarations,[{needId:'IMPL_NATIVE',line:1,endLine:4,kind:'multiline-need'}]);
+  const oneLine=entities.find(entity=>entity.needIds.includes('IMPL_NATIVE_ONE'));
+  assert.equal(oneLine.symbol,'nativeHelper');
+  assert.equal(oneLine.declarations[0].kind,'need');
+  const anonymous=entities.find(entity=>entity.needIds.includes('TEST_NATIVE'));
+  assert.equal(anonymous.path,'tests/native.test.mjs');
+  assert.deepEqual(anonymous.markerLines,[2]);
+  assert.deepEqual(Object.fromEntries(['symbol','signature','startLine','endLine','kind','language'].map(key=>[key,anonymous[key]])),{symbol:null,signature:null,startLine:null,endLine:null,kind:null,language:null});
+  assert.equal(refs.get('TEST_NATIVE')[0].line,2);
+  assert.equal(refs.get('IMPL_NATIVE')[0].scope.symbol,'nativeSum');
+  assert.match((await sourceAt('tests/native.test.mjs',2,root)).excerpt,/TEST_NATIVE/);
+  // Unrelated changes keep a verified source location, but never current scope.
+  await fs.appendFile(path.join(root,'src/demo.ts'),'// unrelated change\n');
+  let stale=await readNeedsIndex(root);
+  assert.equal(stale.index.state,'stale');
+  assert.equal(stale.refs.get('TEST_NATIVE')[0].line,2);
+  assert.equal(stale.refs.get('TEST_NATIVE')[0].scope,undefined);
+  // Moving a declaration invalidates the old source record until another build.
+  await fs.writeFile(testFile,'// inserted line\n'+testSource);
+  stale=await readNeedsIndex(root);
+  assert.deepEqual(stale.refs.get('TEST_NATIVE'),[]);
+  await assert.rejects(sourceAt('tests/native.test.mjs',2,root),error=>error.status===404);
+  built=await buildNeedsIndex(root,{python});
+  assert.equal(built.state,'current',built.error);
+  assert.equal((await readNeedsIndex(root)).refs.get('TEST_NATIVE')[0].line,3);
+  // Removing the marker and failing a build preserves history, not a live link.
+  await fs.writeFile(testFile,"import test from 'node:test';\n\ntest('unmarked', () => {});\n");
+  built=await buildNeedsIndex(root,{runner:async()=>{throw Error('native fixture failure');}});
+  assert.equal(built.state,'failed');
+  const failed=await readNeedsIndex(root);
+  assert.ok(failed.needs.TEST_NATIVE);
+  assert.deepEqual(failed.refs.get('TEST_NATIVE'),[]);
+  await assert.rejects(sourceAt('tests/native.test.mjs',3,root),error=>error.status===404);
+});
+
 test('显式重建同步 suite 的三个外部修改来源并真正恢复 current',{skip:!existsSync(python)&&'先运行 uv sync --locked 启用真实 Sphinx 集成测试'},async t=>{
   const root=await fixture(t,{configured:true});
+  for(const file of ['server/average.mjs','tests/average.test.mjs'])await fs.copyFile(path.join(project,file),path.join(root,file));
   for(const name of ['calculator','sum','expression','calculator-suite']) {
     for(const suffix of ['.json','.requirements.json'])await fs.copyFile(path.join(project,'contracts',name+suffix),path.join(root,'contracts',name+suffix));
   }
@@ -172,11 +237,12 @@ test('显式重建同步 suite 的三个外部修改来源并真正恢复 curren
   assert.equal((await traceability(root,'calculator.suite')).index.state,'stale');
   result=await buildTraceabilityIndex(root,'calculator.suite',{python});
   assert.equal(result.index.state,'current',result.index.error);
-  const {needs}=await readNeedsIndex(root);
-  const compute=Object.values(needs).find(need=>need.type==='impl'&&need.source_symbol==='computeAverage');
-  assert.equal(compute.source_path,'server/average.mjs');
-  assert.equal(compute.implements.length,1);
-  assert.deepEqual(needs[compute.implements[0]].fulfills,['REQ_AVERAGE_COMPUTE']);
+  const {needs,entities}=await readNeedsIndex(root);
+  const compute=entities.find(entity=>entity.symbol==='computeAverage');
+  assert.equal(compute.path,'server/average.mjs');
+  const spec=Object.values(needs).find(need=>need.type==='spec'&&need.node_id==='avg-compute');
+  assert.ok(compute.needIds.includes(spec.id));
+  assert.deepEqual(spec.fulfills,['REQ_AVERAGE_COMPUTE']);
   assert.deepEqual(needs.TEST_AVG_20.verifies,['REQ_AVERAGE_ALL.AVG_20','REQ_AVERAGE_COMPUTE.AVG_DIVIDE']);
   assert.deepEqual(needs.REQ_AVERAGE_COMPUTE.parts.AVG_DIVIDE.verifies_back,['TEST_AVG_20']);
   for(const changed of modified) {

@@ -5,10 +5,11 @@ import sys
 
 from sphinx.application import Sphinx
 from sphinx_codelinks.analyse.analyse import SourceAnalyse
+from sphinx_codelinks.analyse.models import NeedIdRefs
 from sphinx_codelinks.config import CodeLinksConfig, locate_src_dir
 from sphinx_codelinks.sphinx_extension.need_id_refs import project_roots
 from sphinx_codelinks.sphinx_extension.project_analysis import prepare_analyse_config
-from sphinx_codelinks.sphinx_extension.rediscovery import effective_refs
+from sphinx_codelinks.sphinx_extension.rediscovery import effective_pages, effective_refs
 
 
 def export_entities(app, root, config):
@@ -19,24 +20,35 @@ def export_entities(app, root, config):
     """
     roots = project_roots(app.confdir, config)
     records = effective_refs(app.env, config)
+    # Anchors exist only for native needs accepted by src-trace in this build.
+    # Their source path is canonical even when a URL carries a Git-root prefix.
+    declarations = {}
+    for page in effective_pages(app.env, config):
+        for line, _docname, need_id in page.anchors:
+            declarations.setdefault((Path(page.source).resolve(), line), set()).add(need_id)
     entities = {}
     for project, project_config in sorted(config.projects.items()):
+        source_dir = locate_src_dir(app.confdir, config, project_config["source_discover_config"])
         attached = {
             ((Path(roots[project]) / ref.path).resolve(), ref.lineno, ref.need_id)
             for ref in records if ref.project == project
         }
-        if not attached:
+        files = {file for file, _, _ in attached}
+        files.update(file for file, _ in declarations if file.is_relative_to(source_dir))
+        if not files:
             continue
-        source_dir = locate_src_dir(app.confdir, config, project_config["source_discover_config"])
         analysis = SourceAnalyse(prepare_analyse_config(
             app.confdir, config, project_config, src_dir=source_dir,
-            src_files=sorted({file for file, _, _ in attached}),
+            src_files=sorted(files),
         ), name=project)
         analysis.run(log_summary=False)
-        for marker in analysis.need_id_refs:
+        for marker in analysis.all_marked_content:
             file = Path(marker.filepath).resolve()
             line = marker.source_map["start"]["row"] + 1
-            need_ids = {need_id for need_id in marker.need_ids if (file, line, need_id) in attached}
+            native = not isinstance(marker, NeedIdRefs)
+            need_ids = declarations.get((file, line), set()) if native else {
+                need_id for need_id in marker.need_ids if (file, line, need_id) in attached
+            }
             if not need_ids:
                 continue
             relative = file.relative_to(root).as_posix()
@@ -60,6 +72,15 @@ def export_entities(app, root, config):
             })
             entity["needIds"].update(need_ids)
             entity["markerLines"].add(line)
+            if native:
+                for need_id in sorted(need_ids):
+                    declaration = {
+                        "needId": need_id, "line": line,
+                        "endLine": marker.source_map["end"]["row"] + 1,
+                        "kind": marker.type.value,
+                    }
+                    if declaration not in entity.setdefault("declarations", []):
+                        entity["declarations"].append(declaration)
     result = list(entities.values())
     for entity in result:
         entity["needIds"] = sorted(entity["needIds"])

@@ -12,8 +12,7 @@ const capabilities=[
   { id:'feedback.submit', title:'反馈工单', rootNodeId:'submit',
     nodeIds:['submit','form','validate','lookup','save','view'],
     runPath:'/api/submit', testPath:'/api/test', frontend:{entry:'feedback',feature:'feedback',component:'FeedbackPreview',path:'features/feedback/client.tsx',mode:'feedback'},
-    implementation:[{path:'server/domain.mjs',symbol:'runSubmission'}], testFiles:['tests/domain.test.mjs'],
-    requirementIds:['REQ_FEEDBACK_SUBMIT','REQ_FEEDBACK_FORM','REQ_FEEDBACK_VALIDATE','REQ_FEEDBACK_LOOKUP','REQ_FEEDBACK_SAVE','REQ_FEEDBACK_VIEW'] }
+    testFiles:['tests/domain.test.mjs'] }
 ];
 const routes=[
   {method:'GET',path:'/api/adapters',handle:async()=>({adapters:await listAdapters()})},
@@ -26,10 +25,9 @@ const routes=[
   }},
   {method:'POST',path:'/api/reset',handle:()=>{store=createStore();return {items:store.items};}}
 ];
-const code=Object.entries({submit:'runSubmission',form:'FeedbackPreview',validate:'validateFeedback',lookup:'findDuplicate',save:'saveFeedback',view:'toUiState'}).map(([nodeId,symbol])=>({nodeId,symbol,file:nodeId==='form'?'features/feedback/client.tsx':'server/domain.mjs'}));
 const codeOverride=(nodeId,url)=>{
   if(nodeId!=='validate'||!url.searchParams.has('language'))return undefined;
   const file=adapterSource(url.searchParams.get('language'));
   return file?{symbol:'feedback.validate',absoluteFile:file,wholeFile:true}:null;
 };
-export default {id:'feedback',features,capabilities,routes,code,codeOverride};
+export default {id:'feedback',features,capabilities,routes,codeOverride};

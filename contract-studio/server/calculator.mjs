@@ -1,9 +1,9 @@
-// @need-ids: REQ_CALC_INPUT
+// @need-ids: REQ_CALC_INPUT, FUNC_SUITE_63616C632D696E707574, FUNC_63616C632D696E707574
 export function captureCalculatorInput(raw) {
   return { status: 'received', draft: raw && typeof raw === 'object' ? raw : {} };
 }
 
-// @need-ids: REQ_CALC_VALIDATE
+// @need-ids: REQ_CALC_VALIDATE, FUNC_SUITE_63616C632D76616C6964617465, FUNC_63616C632D76616C6964617465
 export function validateCalculatorInput(raw) {
   const parse = value => {
     if ((typeof value !== 'string' && typeof value !== 'number') || String(value).trim() === '') return null;
@@ -19,7 +19,7 @@ export function validateCalculatorInput(raw) {
   return { status: 'valid', input: { left, right, operator } };
 }
 
-// @need-ids: REQ_CALC_COMPUTE
+// @need-ids: REQ_CALC_COMPUTE, FUNC_SUITE_63616C632D636F6D70757465, FUNC_63616C632D636F6D70757465
 export function computeCalculator(input) {
   const { left, right, operator } = input;
   let value;
@@ -35,12 +35,12 @@ export function computeCalculator(input) {
     : { status: 'invalid', message: '结果超出可表示的数值范围。' };
 }
 
-// @need-ids: REQ_CALC_RESULT
+// @need-ids: REQ_CALC_RESULT, FUNC_SUITE_63616C632D726573756C74, FUNC_63616C632D726573756C74
 export function calculatorUi(result) {
   return { tone: result.status === 'success' ? 'success' : 'error', message: result.message };
 }
 
-// @need-ids: REQ_CALC_ALL
+// @need-ids: REQ_CALC_ALL, FUNC_SUITE_63616C63756C61746F72, FUNC_63616C63756C61746F72
 export async function runCalculation(raw, mode = 'dry-run') {
   if (!['dry-run', 'sandbox'].includes(mode)) throw Error('Unknown mode');
   const trace = [];

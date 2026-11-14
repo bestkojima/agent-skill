@@ -1,6 +1,6 @@
 # 以功能节点组织 AI 开发
 
-状态：设计与验收范围已确认。日期：2026-11-13。当前使用方式见[项目说明](../../README.md)。
+状态：设计与验收范围已确认；2026-11-14 补充规范驱动的自动映射。当前使用方式见[项目说明](../../README.md)。
 
 ## 用户要完成的工作
 
@@ -32,6 +32,7 @@
 - 稳定节点 ID、名称、节点类型、父节点。类型区分功能组、处理步骤与界面；功能组可继续添加子节点。
 - 父子关系表示包含；连线表示数据传递或业务依赖，必要时记录分支条件。移动位置、折叠和缩放属于展示设置。
 - 一个节点可关联多条需求，一条需求也可由多个节点共同落实。兼容旧数据的单条关联，保留已有需求 ID。
+- 节点由 `spec` 投影，映射规则集中在 `traceability/node-mapping.json`；`feature_id` 指定视图，`node_id` 缺省时采用 spec ID。规格标题、正文与 `node_properties` 形成节点属性，原生关系表达需求、层级与数据流。
 
 ### 重要性
 
@@ -62,11 +63,11 @@
 - 前端入口：实际组件或操作入口及其输入、成功结果、失败反馈。
 - 测试关联：测试用例与验收条件对应；允许多个测试覆盖一个功能。
 
-内部节点的输入输出按具体函数描述；试运行适配器的外部输入另行登记。业务数据流、注册声明的函数调用、运行中观察到的调用分别记录来源。测试以稳定 ID、真实文件及名称关联验收条件，逐用例状态来自执行报告；需求关联到函数不充当执行覆盖率。
+内部节点的输入输出按具体函数描述；试运行适配器的外部输入另行登记。业务数据流、Needs 中声明的函数调用、运行中观察到的调用分别记录来源。原生 `test.verifies` 连接验收条件，执行报告用真实文件与名称中的 `[TEST_ID]` 匹配逐用例状态；需求关联到函数不充当执行覆盖率。
 
 实现与测试位置由受支持的索引结果解析；缺项显示待接入。文档中的关联不自动授予运行权限，画布也不接受任意 Shell 命令。
 
-功能接入统一使用可信登记：来源文件、别名、路由、实现符号、前端入口及测试信息由功能模块声明，框架消费声明。业务组件放在相应前端模块中；框架宿主负责图和节点面板，避免为每项业务追加分支。旧入口与浏览器草稿身份随登记保留。
+节点到函数的关系由函数上的精确 spec ID，或原生 `impl.implements` 解析；多个节点共享需求时，需求 ID 只提供粗粒度引用。功能模块仅登记实际来源、别名、路由、能力、前端入口和允许执行的测试文件。业务组件放在相应前端模块中，框架按规则消费规格与索引；新增节点无需修改追踪核心或手填函数／测试对照表。旧入口与浏览器草稿身份继续保留。
 
 ### 状态与证据
 
@@ -96,16 +97,17 @@
 
 ## Sphinx-Needs、CodeLinks、ubCode 的职责
 
-Codex 根据自然语言整理结构化需求；Sphinx-Needs 解析 `req/spec/impl/test` 条目、验收子条目与关系。CodeLinks 读取源码标记并提供函数身份、签名和范围。ubCode 可提供兼容的索引、诊断和 CLI/MCP 查询，当前保持未接入；React Flow 提供编辑与运行入口。操作方法见 [Sphinx-Needs 与 CodeLinks 用法](../../README.md#sphinx-needs-与-codelinks-用法)。
+Codex 根据自然语言编写结构化需求与源码标记；Sphinx-Needs 解析 `req/spec/impl/test` 条目、验收子条目与关系，CodeLinks 提取标记所在函数的身份、签名和范围。框架按统一规则投影节点、属性和关联，Agent 无需再维护一份对应表。ubCode 可提供兼容的索引、诊断和 CLI/MCP 查询，当前保持未接入；React Flow 提供编辑与运行入口。格式与操作方法集中在 [Sphinx-Needs 与 CodeLinks 用法](../../README.md#sphinx-needs-与-codelinks-用法)。
 
 官方依据：[Sphinx-Needs](https://sphinx-needs.readthedocs.io/en/latest/)、[needs.json 构建](https://sphinx-needs.readthedocs.io/en/latest/builders.html)、[CodeLinks](https://codelinks.useblocks.com/)、[ubCode 与 Sphinx 集成](https://ubcode.useblocks.com/paths/sphinx.html)、[ubCode MCP](https://ubcode.useblocks.com/features/mcp/index.html)。ubCode 的项目 MCP 工具需要适用的项目许可；工具安装和许可可用性须分别确认。
 
 ### 已确认的接入方案
 
-框架保留现有 JSON 作为可编辑源，保留需求 ID、确认记录、旧接口及浏览器草稿。保存后生成 RST，实际运行 Sphinx-Needs 与 CodeLinks，再由后端将构建结果整理为前端和 Codex 共用的追踪视图。来源适配由框架接入层处理，Skill 使用既定入口。
+框架保留现有 JSON 的编辑入口、需求 ID、确认记录、旧接口及浏览器草稿。原生 RST 也可作为新条目的权威源：构建后自动进入指定功能视图，工作台编辑行为属性时写回原文档；移动位置只保存布局。既有 JSON 对应的 RST 和 `node-properties.rst` 是生成文件，后者用 `needextend` 附加投影字段。每条语义只编辑其拥有的源，节点文档和索引统一派生。
 
 ```text
-项目需求与节点源 → 派生 RST → Sphinx-Needs + CodeLinks → 构建索引
+既有 JSON → 派生 RST ─┐
+原生 RST 与源码标记 ──┴→ Sphinx-Needs + CodeLinks → 索引 → 节点投影
                                                         ↓
                                                 工作台 / Codex
 已保存的 RST 与源码 → ubCode 索引、诊断、CLI/MCP 查询（接入后）

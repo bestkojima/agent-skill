@@ -4,11 +4,17 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { featureRegistry } from './feature-registry.mjs';
+import { readNeedsIndex } from './needs-index.mjs';
+import { indexedCapabilityBindings } from './backend-relations.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // Reviewed project declarations; diagrams cannot register executable commands.
 const registry = featureRegistry.capabilities;
-export function listCapabilities() { return structuredClone(registry); }
+export function listCapabilities() { return structuredClone(registry).map(cap=>({...cap,implementation:[],requirementIds:[]})); }
+export async function indexedCapabilities(root=projectRoot) {
+  const {index,needs,entities}=await readNeedsIndex(root);
+  return listCapabilities().map(cap=>({...cap,...indexedCapabilityBindings(cap,needs,entities),indexState:index.state}));
+}
 function capability(id) {
   const found = registry.find(item => item.id === id);
   if (!found) throw new Error('未知的功能能力');
@@ -17,8 +23,8 @@ function capability(id) {
 
 // Saved evidence and draft previews inspect the same capability-owned contract.
 export function capabilityGraphContract(graph, cap) {
-  const nodes=graph.nodes.filter(node=>cap.nodeIds.includes(node.id)||node.capabilityId===cap.id)
-    .map(({position,size,importance,...node})=>node);
+  const nodes=graph.nodes.filter(node=>cap.nodeIds?.includes(node.id)||node.capabilityId===cap.id)
+    .map(({position,size,importance,needId,code,test,...node})=>node);
   const ids=new Set(nodes.map(node=>node.id));
   return {nodes,edges:graph.edges?.filter(edge=>ids.has(edge.source)||ids.has(edge.target))};
 }
@@ -37,9 +43,11 @@ async function filesUnder(root, dir) {
 }
 
 // Metadata tracks the actual candidate without storing source code or hashing files.
-async function candidate(root, cap) {
+async function candidate(root, cap, snapshot) {
+  snapshot??=await readNeedsIndex(root);
+  const binding=indexedCapabilityBindings(cap,snapshot.needs,snapshot.entities);
   const relevant = new Set([...cap.testFiles,'server/api.mjs','server/capabilities.mjs','scripts/test-case-reporter.mjs',
-    ...await filesUnder(root,'src'), ...await filesUnder(root,'features'), ...cap.implementation.map(ref=>ref.path),
+    ...await filesUnder(root,'src'), ...await filesUnder(root,'features'), ...binding.implementation.map(ref=>ref.path),
     ...await filesUnder(root,'server').then(files=>files.filter(file=>!file.startsWith('server/adapters/')))]);
   const files = [];
   for (const file of [...relevant].sort()) {
@@ -47,27 +55,50 @@ async function candidate(root, cap) {
     catch (error) { if (error.code!=='ENOENT') throw error; files.push({path:file,missing:true}); }
   }
   const contracts = [];
+  const data=[];
   for (const file of (await filesUnder(root,'contracts')).filter(file=>file.endsWith('.json')).sort()) {
     const value=JSON.parse(await fs.readFile(path.join(root,file),'utf8'));
-    if (Array.isArray(value.requirements)) {
-      for (const req of value.requirements.filter(req=>cap.requirementIds.includes(req.id))) {
-        contracts.push({file,id:req.id,title:req.title,description:req.description,nodeIds:req.nodeIds??[req.nodeId],acceptance:req.acceptance??[]});
-      }
-    } else if (Array.isArray(value.nodes)) {
+    data.push({file,value});
+    if (Array.isArray(value.nodes)) {
       const contract=capabilityGraphContract(value,cap);
       if (contract.nodes.length) contracts.push({file,...contract});
     }
   }
-  return {files,contracts};
+  const nodeIds=new Set([...(cap.nodeIds??[]),...contracts.flatMap(contract=>contract.nodes?.map(node=>node.id)??[])]);
+  const requirementIds=new Set(binding.requirementIds);
+  for(const {file,value} of data)for(const req of value.requirements??[]) {
+    if(requirementIds.has(req.id)||(req.nodeIds??[req.nodeId]).some(id=>nodeIds.has(id))) {
+      requirementIds.add(req.id);
+      contracts.push({file,id:req.id,title:req.title,description:req.description,nodeIds:req.nodeIds??[req.nodeId],acceptance:req.acceptance??[]});
+    }
+  }
+  // Native Needs documents participate through their semantic content; layout and
+  // importance stay outside evidence. An out-of-date index cannot certify them.
+  const specifications=Object.values(snapshot.needs).filter(need=>need.type==='spec'&&
+    (nodeIds.has(need.node_id??need.id)||JSON.parse(need.node_properties||'{}').capabilityId===cap.id))
+    .map(need=>{
+      const {position,size,importance,...properties}=JSON.parse(need.node_properties||'{}');
+      return {id:need.id,title:need.title,...(need.contract_source?{}:{content:need.content}),properties,fulfills:need.fulfills??[],contains:need.contains??[],parent:need.parent_spec??[],flowsTo:need.flows_to??[],edges:need.node_edges??null};
+    });
+  const requirements=[...requirementIds].filter(id=>snapshot.needs[id]).sort().map(id=>{
+    const need=snapshot.needs[id];return {id,title:need.title,content:need.content,parts:need.parts};
+  });
+  return {files,contracts,specifications,requirements,
+    testCases:binding.testCases.map(({id,file,files,name,verifies})=>({id,file,files,name,verifies})),
+    indexReady:['current','unconfigured'].includes(snapshot.index.state)};
 }
 const reportPath = (root,id) => path.join(root,'traceability','_build','test-results',`${id}.json`);
 function publicReport(report) { const {candidate: _candidate,...result}=report; return result; }
-function caseResults(cap, root, events=[]) {
-  return (cap.testCases??[]).map(declaration=>{
-    const matches=events.filter(event=>event.name===declaration.name && event.file &&
-      path.resolve(root,event.file)===path.resolve(root,declaration.file));
-    const {name:_name,file:_file,...outcome}=matches.length===1 ? matches[0] : {
-      state:'not-run',message:matches.length ? '同文件存在同名用例，无法唯一关联结果' : '本次运行未匹配到该用例',
+function caseResults(declarations, cap, root, events=[]) {
+  return declarations.map(declaration=>{
+    const trusted=declaration.file&&cap.testFiles.some(file=>path.resolve(root,file)===path.resolve(root,declaration.file));
+    const matches=trusted?events.filter(event=>event.id===declaration.id && event.file &&
+      path.resolve(root,event.file)===path.resolve(root,declaration.file))
+      :[];
+    const {id:_id,name:_name,file:_file,...outcome}=matches.length===1 ? matches[0] : {
+      state:'not-run',message:declaration.sourceState==='ambiguous'?'测试 ID 对应多个源码文件，无法唯一关联结果':
+        !declaration.file?'测试条目尚无 CodeLinks 源码定位':!trusted?'测试源码未列入该能力的可信测试文件':
+        matches.length ? '同文件存在重复测试 ID，无法唯一关联结果' : '本次运行未匹配到该测试 ID',
     };
     return {...structuredClone(declaration),...outcome};
   });
@@ -76,16 +107,52 @@ function staleCases(cases) {
   return cases.map(item=>item.state==='not-run' || item.state==='stale' ? item :
     {...item,state:'stale',observedState:item.state});
 }
+// Completeness concerns indexed test declarations only, not every requirement
+// or code branch. TAP's aggregate result remains a separate execution outcome.
+function caseCoverage(cases,index) {
+  const counts={declared:cases.length,passed:0,failed:0,skipped:0,notRun:0,stale:0,unlinked:0};
+  for(const item of cases) {
+    counts[item.state==='not-run'?'notRun':item.state]++;
+    if(!item.verifies.length||item.verifies.some(link=>link.state!=='linked'))counts.unlinked++;
+  }
+  const state=index.state!=='current'?'unindexed':!cases.length?'empty':counts.stale?'stale':
+    counts.notRun||counts.skipped||counts.unlinked?'incomplete':'complete';
+  return {state,...counts};
+}
+function coverageMessage(coverage) {
+  if(coverage.state==='unindexed')return '需求索引尚未就绪；固定测试的执行结果不能作为当前需求的逐用例证据';
+  if(coverage.state==='empty')return '固定测试已执行；当前索引没有关联测试条目';
+  if(coverage.state==='incomplete')return `关联用例证据尚不完整：${coverage.notRun} 项未匹配，${coverage.skipped} 项跳过，${coverage.unlinked} 项缺少有效需求关联`;
+}
+function currentCases(declarations,cap,root,previous) {
+  return caseResults(declarations,cap,root).map(item=>{
+    const observed=previous.find(result=>result.id===item.id&&result.file===item.file);
+    if(!observed)return item;
+    const {state,observedState,line,durationMs,message}=observed;
+    return {...item,state,observedState,line,durationMs,message};
+  });
+}
 export async function capabilityEvidence(id, root=projectRoot) {
   const cap=capability(id);
+  const snapshot=await readNeedsIndex(root);
+  const declarations=indexedCapabilityBindings(cap,snapshot.needs,snapshot.entities).testCases;
+  const caseIndex={state:snapshot.index.state,source:snapshot.index.source};
   let report;
   try { report=JSON.parse(await fs.readFile(reportPath(root,id),'utf8')); }
-  catch (error) { if (error.code==='ENOENT') return {capabilityId:id,state:'not-run',cases:caseResults(cap,root),message:'尚未运行关联测试'}; throw error; }
-  report.cases??=caseResults(cap,root);
-  if (!isDeepStrictEqual(report.candidate,await candidate(root,cap))) {
-    return {...publicReport(report),state:'stale',cases:staleCases(report.cases),message:'相关代码或行为契约已变化，请重新运行测试'};
+  catch (error) {
+    if (error.code==='ENOENT') {
+      const cases=caseResults(declarations,cap,root);
+      return {capabilityId:id,state:'not-run',cases,caseIndex,caseCoverage:caseCoverage(cases,caseIndex),message:'尚未运行关联测试'};
+    }
+    throw error;
   }
-  return publicReport(report);
+  report.cases??=caseResults(declarations,cap,root);
+  const unindexed=!['current','unconfigured'].includes(snapshot.index.state);
+  if (unindexed || !isDeepStrictEqual(report.candidate,await candidate(root,cap,snapshot))) {
+    const cases=staleCases(currentCases(declarations,cap,root,report.cases));
+    return {...publicReport(report),state:'stale',cases,caseIndex,caseCoverage:caseCoverage(cases,caseIndex),message:'相关代码、行为契约或需求索引已变化，请重建索引后重新运行测试'};
+  }
+  return {...publicReport(report),caseIndex,caseCoverage:caseCoverage(report.cases,caseIndex)};
 }
 
 function executeTests(root, testFiles, eventFile) {
@@ -111,11 +178,13 @@ export async function runCapabilityTests(id, root=projectRoot) {
   const key=`${root}:${id}`;
   if(active.has(key)) return active.get(key);
   const job=(async()=>{
-    const before=await candidate(root,cap);
+    const snapshot=await readNeedsIndex(root);
+    const declarations=indexedCapabilityBindings(cap,snapshot.needs,snapshot.entities).testCases;
+    const before=await candidate(root,cap,snapshot);
     const startedAt=new Date().toISOString(), start=performance.now();
     const file=reportPath(root,id);
     await fs.mkdir(path.dirname(file),{recursive:true});
-    const eventFile=cap.testCases?.length ? file.replace(/\.json$/,'.events.jsonl') : undefined;
+    const eventFile=file.replace(/\.json$/,'.events.jsonl');
     if (eventFile) await fs.writeFile(eventFile,'');
     const result=await executeTests(root,cap.testFiles,eventFile);
     let events=[];
@@ -124,14 +193,19 @@ export async function runCapabilityTests(id, root=projectRoot) {
       catch (error) { result.message=[result.message,`逐用例报告读取失败：${error.message}`].filter(Boolean).join('；'); }
     }
     const changed=!isDeepStrictEqual(before,await candidate(root,cap));
+    const unindexed=!['current','unconfigured'].includes(snapshot.index.state);
     const passed=Number(result.output.match(/^# pass (\d+)\s*$/m)?.[1]??0);
     const failed=Number(result.output.match(/^# fail (\d+)\s*$/m)?.[1]??0);
-    const cases=caseResults(cap,root,events);
-    const report={capabilityId:id,state:changed?'stale':result.exitCode===0&&passed>0&&failed===0?'passed':'failed',
-      cases:changed ? staleCases(cases) : cases,
+    const observed=caseResults(declarations,cap,root,events);
+    const cases=changed||unindexed?staleCases(observed):observed;
+    const caseIndex={state:snapshot.index.state,source:snapshot.index.source};
+    const coverage=caseCoverage(cases,caseIndex);
+    const executionState=result.exitCode===0&&passed>0&&failed===0?'passed':'failed';
+    const report={capabilityId:id,state:changed||unindexed?'stale':executionState,executionState,
+      cases,caseIndex,caseCoverage:coverage,
       passed,failed,exitCode:result.exitCode,startedAt,completedAt:new Date().toISOString(),durationMs:Math.round(performance.now()-start),
       command:['node',...result.args],output:result.output,candidate:before,
-      message:changed?'运行期间相关代码或契约发生变化，请重新测试':result.message||undefined};
+      message:[result.message,changed?'运行期间相关代码或契约发生变化，请重新测试':coverageMessage(coverage)].filter(Boolean).join('；')||undefined};
     await fs.writeFile(file,JSON.stringify(report,null,2)+'\n');
     return publicReport(report);
   })();

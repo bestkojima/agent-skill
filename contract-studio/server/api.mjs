@@ -1,6 +1,6 @@
 import { traceability, buildTraceabilityIndex, updateRequirement, updateGraph, sourceAt, isLocalRequest, isLocalWrite, TraceError } from './traceability.mjs';
 import { openSource } from './editor.mjs';
-import { listCapabilities, capabilityEvidence, runCapabilityTests } from './capabilities.mjs';
+import { indexedCapabilities, capabilityEvidence, runCapabilityTests } from './capabilities.mjs';
 
 import { featureRegistry, featureCatalog, featureSource } from './feature-registry.mjs';
 import { nodeContext } from './node-context.mjs';
@@ -46,7 +46,7 @@ export async function api(req, res, next) {
     }
     if (req.method === 'GET' && url.pathname === '/api/capabilities') {
       if (!isLocalRequest(req)) return reply(res, 403, {error:'Only same-origin local requests are allowed'});
-      return reply(res, 200, {capabilities:listCapabilities()});
+      return reply(res, 200, {capabilities:await indexedCapabilities()});
     }
     if (req.method === 'GET' && url.pathname === '/api/capabilities/evidence') {
       if (!isLocalRequest(req)) return reply(res, 403, {error:'Only same-origin local requests are allowed'});

@@ -2,15 +2,17 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { traceability, validateGraph, TraceError } from './traceability.mjs';
-import { listCapabilities, capabilityEvidence, capabilityGraphContract } from './capabilities.mjs';
+import { indexedCapabilities, capabilityEvidence, capabilityGraphContract } from './capabilities.mjs';
+import { readNeedsIndex } from './needs-index.mjs';
 import { describeNodeContext } from '../src/node-context.mjs';
 import { nodeImportance } from '../src/node-importance.mjs';
 import { backendRelations, nodeBackend } from './backend-relations.mjs';
 import { featureRegistry } from './feature-registry.mjs';
+import { nodeProperties } from './needs-projection.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const normalizeNode = node => node ? {...node, importance:nodeImportance(node.importance)} : null;
-const semanticGraph = graph => ({...graph, nodes:graph.nodes.map(({position,size,importance,...node})=>node)});
+const semanticGraph = graph => ({...graph, nodes:graph.nodes.map(({position,size,importance,needId,code,test,...node})=>node)});
 const uniqueRefs = refs => [...new Map(refs.map(ref=>[`${ref.path}:${ref.line}`,ref])).values()];
 const evidenceSummary = report => {
   const {output, ...summary} = report;
@@ -33,14 +35,14 @@ function gapsFor(node, requirements, capability, index, evidence, backend) {
   }
   if (!capability) add('capability.missing',node.capabilityId?`能力 ${node.capabilityId} 尚未登记`:'实现并登记可信能力');
   else {
-    if (!backend.functions.length) add('implementation.missing','登记该节点的直接实现函数');
+    if (!backend.functions.length) add('implementation.missing','在实际函数旁引用该节点的规格 ID，并刷新索引');
     if(index.state==='current')for(const fn of backend.functions)if(fn.scopeState!=='current')add(`implementation.${fn.id}.scope`,`${fn.path}#${fn.symbol} 尚未取得唯一的 CodeLinks 函数定位`);
     if (!capability.frontend) add('frontend.missing','接入前端功能操作');
     if (!capability.testFiles?.length) add('tests.missing','登记关联测试');
   }
   for(const requirement of requirements)for(const criterion of requirement.acceptance??[]) {
     const cases=backend.testCases.filter(test=>test.verifies.some(link=>link.requirementId===requirement.id&&link.acceptanceId===criterion.id));
-    if(!cases.length)add(`tests.mapping.${requirement.id}.${criterion.id}`,`${requirement.id}.${criterion.id} 尚未登记具体测试用例`);
+    if(!cases.length)add(`tests.mapping.${requirement.id}.${criterion.id}`,`${requirement.id}.${criterion.id} 尚未找到带 verifies 的测试条目`);
     else if(!cases.some(test=>test.state==='passed'))add(`tests.case.${requirement.id}.${criterion.id}`,`${requirement.id}.${criterion.id} 尚无当前通过的逐用例证据`);
   }
   if (index && !['current','unconfigured'].includes(index.state)) add('index.refresh',`需求索引为 ${index.state}，需更新关联证据`);
@@ -78,8 +80,8 @@ function formatDocument(context) {
       ...(requirement.acceptance??[]).map(item=>`- ${item.id}：输入 ${item.input}；预期 ${item.expected}${item.observable?'；观察 '+item.observable:''}`)
     ].join('\n')).join('\n\n')||'待关联'}`,
     `## 实现函数\n${context.implementation.map(ref=>`- ${ref.path}#${ref.symbol} · ${ref.startLine??'?'}–${ref.endLine??'?'} · ${ref.scopeState}`).join('\n')||'待实现'}`,
-    `## 后端连接\n${context.backend.calls.map(call=>`- 声明调用：${call.callerRef.path}#${call.callerRef.symbol} → ${call.calleeRef.path}#${call.calleeRef.symbol}`).join('\n')||'未登记直接调用'}\n业务出入边属于数据流；实际调用由执行器单独提供，平均值示例见 observedCalls。${context.backend.trial?'\n试运行适配器：'+context.backend.trial.description+schema(context.backend.trial.inputSchema):''}`,
-    `## 验收用例\n${context.backend.testCases.map(test=>`- ${test.id} · ${test.name} · ${test.state}\n  ${test.verifies.map(link=>link.needId+' ['+link.state+']').join(', ')}`).join('\n')||'尚未登记逐用例验收映射'}`,
+    `## 后端连接\n${context.backend.calls.map(call=>`- 声明调用：${call.callerRef.path}#${call.callerRef.symbol} → ${call.calleeRef.path}#${call.calleeRef.symbol}`).join('\n')||'未发现 calls 声明'}\n业务出入边属于数据流；实际调用由执行器单独提供，平均值示例见 observedCalls。${context.backend.trial?'\n试运行适配器：'+context.backend.trial.description+schema(context.backend.trial.inputSchema):''}`,
+    `## 验收用例\n${context.backend.testCases.map(test=>`- ${test.id} · ${test.name} · ${test.state}\n  ${test.verifies.map(link=>link.needId+' ['+link.state+']').join(', ')}`).join('\n')||'尚未解析到 verifies 测试条目'}`,
     `## 前端入口\n${context.frontend?`${context.frontend.component} · ${context.frontend.path} · 模式 ${context.frontend.mode??'默认'}`:'前端待接入'}`,
     `## 源码定位\n${refs(context.code)||'待关联'}`,
     `## 相关测试\n${refs(context.tests)||capability?.testFiles?.join('\n')||'待关联'}`,
@@ -110,7 +112,7 @@ export async function nodeContext({featureId,nodeId,graph:preview} = {}, root = 
   const children = [...nodes.values()].filter(item=>item.parentId===nodeId);
   const childIds = new Set(children.map(item=>item.id));
   const requirements = saved.requirements.filter(requirement=>(requirement.nodeIds??[requirement.nodeId]).includes(nodeId));
-  const capabilities = listCapabilities();
+  const capabilities = await indexedCapabilities(root);
   const capability = (node.capabilityId ? capabilities.find(item=>item.id===node.capabilityId) : capabilities.find(item=>item.nodeIds.includes(nodeId))) ?? null;
   const draft = !isDeepStrictEqual(graph,saved.projectGraph);
   const semanticChanges = draft && !isDeepStrictEqual(semanticGraph(graph),semanticGraph(saved.projectGraph));
@@ -123,11 +125,12 @@ export async function nodeContext({featureId,nodeId,graph:preview} = {}, root = 
     coversCurrentGraph:false,
     message:'当前草稿中该能力的行为契约已变化；项目测试记录尚未覆盖这份草稿。'
   } : savedEvidence ? {...savedEvidence,coversCurrentGraph:savedEvidence.state==='passed'} : null;
+  const indexed=draft?await readNeedsIndex(root):null;
   const relations=draft?backendRelations(graph,saved.requirements,{feature:featureRegistry.resolveFeature(saved.featureId),
-    entities:saved.backend.functions.map(fn=>({...fn,indexState:fn.scopeState}))}):saved.backend;
+    needs:indexed.needs,entities:indexed.entities}):saved.backend;
   const backend=nodeBackend(relations,nodeId,evidence);
   const context = {
-    feature:graph.feature,node,parent:ancestors.at(-1)??null,ancestors,incoming,outgoing,children,
+    feature:graph.feature,node,properties:nodeProperties(node),parent:ancestors.at(-1)??null,ancestors,incoming,outgoing,children,
     internalEdges:graph.edges.filter(edge=>childIds.has(edge.source)&&childIds.has(edge.target)),
     requirements,capability,implementation:backend.functions,relatedImplementation:backend.relatedFunctions,backend,frontend:capability?.frontend??null,
     code:uniqueRefs(requirements.flatMap(requirement=>requirement.code??[])),

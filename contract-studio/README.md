@@ -17,11 +17,11 @@
 | 预览画布草稿 | `POST /api/node-context/preview` 携带 `featureId`、`graph`、`nodeId`；使用当前画布和已保存需求，只读生成与侧栏相同的上下文 |
 | 读取完整图与关联 | `GET /api/traceability?feature=<已登记功能>`；返回持久图、需求、代码／测试引用、`backend` 关系及索引状态 |
 | 保存契约 | `POST /api/traceability/graph` 携带 `featureId`、`graph`、`expectedGraph`；需求用 `/api/traceability/requirement`，修改已有需求携带 `revision`。载荷见 `server/api.mjs`、`server/traceability.mjs` |
-| 接入实现 | 在 `features/<功能>/server.mjs` 声明来源、可信路由、能力与代码绑定，并由 `server/feature-registry.mjs` 登记；对应 `client.tsx` 提供前端操作，再设置节点 `capabilityId` |
-| 更新索引 | `node scripts/build-index.mjs` 或 `POST /api/traceability/build`；源码与测试使用 `@need-ids:` 标记 |
+| 接入运行 | 在 `features/<功能>/server.mjs` 声明可信路由、能力、测试文件与前端入口，并由 `server/feature-registry.mjs` 登记；对应 `client.tsx` 提供前端操作，再设置节点 `capabilityId` |
+| 更新索引 | `node scripts/build-index.mjs` 或 `POST /api/traceability/build`；从 Needs 条目、源码标记及原生测试声明自动解析关联 |
 | 读取／执行测试 | `GET /api/capabilities/evidence?capabilityId=…` 读取证据；获准运行后用 `POST /api/capabilities/test` 执行登记测试 |
 
-功能登记由服务端维护，工作台自动发现对应的前端模块；新增业务无需在 API 分发、追踪核心和工作台各加一份功能名单。需求源与节点源位于 `contracts/`，保存逻辑见 `server/traceability.mjs`。画布上的 `capabilityId` 只能选择已登记能力，不能提供执行代码。
+功能登记负责可执行入口，需求和函数的语义关系由索引解析。既有源位于 `contracts/`；新增原生 RST 条目可按 `feature_id` 进入已有功能视图，无需增加节点／函数对照表。保存逻辑见 `server/traceability.mjs`。画布上的 `capabilityId` 只能选择已登记能力，不能提供执行代码。
 
 节点上下文由框架统一生成，侧栏、导出文件和 Agent API 共用一份结果。导出仍是快照，接手时读取当前状态。草稿预览会标明来源；行为契约发生未保存修改时，已保存版本的测试结果不能覆盖该草稿。
 
@@ -92,8 +92,8 @@ npm run dev -- --host 127.0.0.1
 
 1. 在图中建立功能节点，填写契约并关联需求，保存选定契约。需求文字与验收条件分别确认，已有授权继续有效。
 2. 在“文档与任务”导出 `<节点ID>.codex-task.md`，交给当前 Codex 聊天。任务包含节点契约、需求、直接上下游及边条件、功能组的直接子节点、实现定位、前端缺口、关联测试和索引状态；未保存的画布内容会在面板提示。
-3. 契约及开发上下文已保存后，Codex 修改实际业务代码、前端入口和测试，使用需求 ID 标记相关位置，并在可信能力登记中接入运行入口。
-4. 保存并重建需求索引，查看实现与测试引用；在前端操作成功和失败样例，再运行关联测试。
+3. 契约及开发上下文已保存后，Codex 在授权范围内修改业务代码、前端入口和测试；函数标记精确的节点规格 ID，原生测试声明引用验收条目。需要实际运行时，再接入可信能力。
+4. 重建需求索引，查看自动生成的节点、属性、函数及测试关联；按任务授权验证成功和失败行为，读取实际测试结果。
 
 一个功能可以由多个函数共同完成。实现按输入处理、业务校验、纯计算、流程组织和界面呈现划分；复用辅助函数时保留各功能的约束。例如平均值允许单个数字，求和仍至少需要 3 个。
 
@@ -107,16 +107,17 @@ npm run dev -- --host 127.0.0.1
 
 ## 需求源与真实索引
 
-本项目的可编辑源是 `contracts/` 下的 JSON。需求正文只维护一份，节点文档和 RST 均为派生视图：
+每条需求与节点规格只维护一份正文：既有条目继续编辑 `contracts/` JSON；新增条目也可直接编写原生 Needs RST。工作台保存时写回各自的源，画布布局单独保存。节点文档和索引由这些源生成：
 
 ```text
-需求与功能图 JSON → 派生 RST → Sphinx-Needs + CodeLinks → needs.json
-                                                            ↓
+既有 JSON → 派生 RST ─┐
+原生 Needs RST ───────┼→ Sphinx-Needs + CodeLinks → 索引 → 通用规则 → 节点与属性
+源码标记与测试声明 ───┘                                      ↓
                                                      工作台 / Codex
 真实运行与测试 → 独立执行证据 → 节点面板
 ```
 
-保存项目图或需求后，工作台同步相应 RST 并执行 Sphinx 构建。界面分别显示文档同步和索引状态；构建失败保留已保存内容及前次索引，标记失败或过期，不会冒充当前结果。源码变动后可点击“重建索引”。
+保存项目图或需求后，工作台写回源并执行 Sphinx 构建。既有 JSON 对应的 RST 与 `traceability/node-properties.rst` 均由 exporter 生成，后者用 `needextend` 补齐节点映射字段，保留为只读产物。界面分别显示保存和索引状态；构建失败保留已保存内容及前次索引，并标记失败或过期。源码变动后可点击“重建索引”。
 
 在工作台外修改了需求、功能图或源码时，重新构建：
 
@@ -124,55 +125,78 @@ npm run dev -- --host 127.0.0.1
 node scripts/build-index.mjs
 ```
 
-该命令同步已登记的需求／功能图对应的 RST 和后端关系视图，再实际构建。指定 `calculator.suite` 时，同步统一计算器及其两数、求和、混合运算来源。产物 `traceability/_build/needs/needs.json` 保存需求关系，旁边的 `code-entities.json` 保存 CodeLinks 函数签名和范围，均不纳入 Git。
+该命令同步既有 JSON 对应的 RST，再构建所有已接入的 Needs 文档与源码。指定 `calculator.suite` 时，同步统一计算器及其两数、求和、混合运算来源。产物 `traceability/_build/needs/needs.json` 保存条目与关系，旁边的 `code-entities.json` 保存 CodeLinks 函数身份、签名和范围，均不纳入 Git。
 
-统一计算器新增需求（包括平均值）写入 `contracts/calculator-suite.requirements.json`。原两数、求和、混合运算需求继续归属各自的需求文件，统一视图聚合读取；反馈工单继续使用 `contracts/requirements.json`。原确认记录和修订信息随源文件保留。
+从画布新增的计算器需求写入 `contracts/calculator-suite.requirements.json`。原两数、求和、混合运算需求继续归属各自的需求文件，统一视图聚合读取；反馈工单继续使用 `contracts/requirements.json`。原确认记录和修订信息随源文件保留。原生 RST 条目保持在其手写文档中，编辑节点属性、需求正文、验收条件或确认状态时写回该文档。
 
 Sphinx-Needs 解析结构化条目和关系，CodeLinks 读取源码标记。当前 Java、PHP 引用使用明确标注的 `local-marker` 兼容扫描，其余受配置支持的引用标注 `sphinx-codelinks`。源码标记只能说明关联位置，实际行为要看运行与测试。
 
 ### Sphinx-Needs 与 CodeLinks 用法
 
-Agent 修改 JSON 源和可信功能登记，框架生成 `req`（需求）、`spec`（节点）、`impl`（具体函数）、`test`（具名测试）。关系为 `spec.fulfills → req`、`impl.implements → spec`、`test.verifies → 需求验收项`；`contains` 表示包含，`flows_to` 保留业务数据流，`impl.calls` 来自登记的调用声明。
+Agent 编写规范条目和源码标记，框架自动关联。**Sphinx-Needs** 解析 `req/spec/impl/test` 及原生关系；**CodeLinks** 从标记所在源码提取文件、函数符号和范围；**节点投影** 按 `traceability/node-mapping.json` 将规格转换为节点属性。运行能力登记只决定哪些入口可以执行。
 
-接入一个节点时：
+新增原生条目时，按下面三处编写；既有 JSON 条目继续从其源修改，复用节点上下文返回的 `needId`。
 
-1. 在 `features/<功能>/server.mjs` 的 `code` 中登记 `{nodeId, file, symbol}`；多个直接函数用 `functions: [{path, symbol}, …]`，保留 `file/symbol` 作为主源码预览入口。
-2. 在实际实现函数前写 `// @need-ids: REQ_AVERAGE_COMPUTE`。在实际测试前写 `// @need-ids: TEST_AVG_20`，并将用例加入能力的 `testCases`；`file` 和 `name` 必须与测试文件和真实名称一致。例如现有用例的登记为：
-
-   ```js
-   {
-     id: 'TEST_AVG_20',
-     name: '平均值：1 至 20 返回总和 210、数量 20、均值 10.5 和真实 21 步',
-     file: 'tests/average.test.mjs',
-     verifies: [
-       {requirementId: 'REQ_AVERAGE_ALL', acceptanceId: 'AVG_20'},
-       {requirementId: 'REQ_AVERAGE_COMPUTE', acceptanceId: 'AVG_DIVIDE'},
-     ],
-   }
-   ```
-
-3. 执行 `node scripts/build-index.mjs`；按本次任务授权运行登记测试，再读取节点上下文。Sphinx 关系配置在 `traceability/ubproject.toml`，新增源码目录也在这里配置 CodeLinks 项目，并在 `traceability/index.rst` 增加 `src-trace`。
-
-验收条件导出为 Sphinx-Needs 的 `need_part`，测试可精确引用到一条条件。以下是上述关联的派生格式节选；直接编辑源 JSON，保留 RST 为生成文件：
+**1. 写需求和节点规格。** 在 `traceability/` 的手写 RST 中定义条目，并加入 `traceability/index.rst` 的 `toctree`。例如给已有计算器视图加一个“加一”节点：
 
 ```rst
-.. req:: 用总和除以数量计算均值
-   :id: REQ_AVERAGE_COMPUTE
+.. req:: 数字加一
+   :id: REQ_INCREMENT
 
-   * :need_part:`(AVG_DIVIDE) 输入总和 210、数量 20；预期均值 10.5。`
+   输入一个数字，返回它加一后的值。
 
-.. test:: 平均值：1 至 20 返回总和 210、数量 20、均值 10.5 和真实 21 步
-   :id: TEST_AVG_20
-   :verifies: REQ_AVERAGE_ALL.AVG_20, REQ_AVERAGE_COMPUTE.AVG_DIVIDE
+   * :need_part:`(PLUS_ONE) 输入 2，预期输出 3。`
+
+.. spec:: 加一
+   :id: SPEC_INCREMENT
+   :feature_id: calculator.suite
+   :fulfills: REQ_INCREMENT
+   :importance: normal
+   :node_properties: {"input":"一个数字","output":"加一后的数字"}
+
+   接受数字并增加一。
 ```
 
-普通验收 ID 原样成为 part ID；含点或以 `PART_` 开头的既有 ID 使用可逆编码，查询时以返回的 `needId` 为准。完整函数／测试条目集中在派生文件 `traceability/backend.rst`。格式依据：[Sphinx-Needs 验收子条目](https://sphinx-needs.readthedocs.io/en/latest/roles.html#need-part-np)、[CodeLinks 源码分析](https://codelinks.useblocks.com/en/sphinx-codelinks-v2.1.0/components/analyse.html)。
+`feature_id` 选择已有功能视图；节点 ID 默认采用 spec ID，兼容旧节点时可填写 `node_id`。标题与正文映射名称和职责，`node_properties` 承载输入输出、处理规则、异常等行为属性。`fulfills` 连接需求，`parent_spec/contains` 连接父子规格，`flows_to` 连接数据流；需要端口或条件时用 `node_edges` JSON 保留完整出边。位置、大小和函数路径由各自的布局或索引维护。
+
+原生需求的节点关联统一修改 `spec.fulfills` 后重建索引；需求保存 API 会拒绝修改其 `nodeIds`，避免同时维护两套关联。需求正文、验收条件及确认仍使用原有保存接口。
+
+**2. 在具体函数上标记精确的 spec ID。** 例如 `server/increment.mjs`：
+
+```js
+// @need-ids: SPEC_INCREMENT
+export function increment(value) { return value + 1; }
+```
+
+多个函数可以标记同一规格，一个函数也可标记多个规格。也可在函数前写原生 `@need impl:` 声明，以 `:implements: SPEC_INCREMENT` 关联并用 `@endneed` 结束。仅有 `REQ_…` 标记时保留需求级引用，无法据此判定同一需求下哪个节点直接实现该函数。
+
+**3. 测试在源码中声明验收关系，并在运行名称里带稳定 ID。** 例如 `tests/increment.test.mjs`：
+
+```js
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { increment } from '../server/increment.mjs';
+
+// @need test: 加一返回预期结果
+// :id: TEST_INCREMENT
+// :verifies: REQ_INCREMENT.PLUS_ONE
+// @endneed
+test('[TEST_INCREMENT] 加一返回预期结果', () => {
+  assert.equal(increment(2), 3);
+});
+```
+
+验收项使用 `need_part`，`test.verifies` 指向 `REQ_ID.PART_ID`。执行报告按允许的测试文件与 `[TEST_ID]` 匹配，显示名称可调整；文件或 ID 缺失、重复或不匹配时显示缺口。需要从工作台执行时，在可信能力的 `testFiles` 中加入该文件，无需再维护 `code`、`implementation` 或 `testCases` 关联表。新节点可以先被索引，再接入运行能力。
+
+完成后执行 `node scripts/build-index.mjs`，读取节点上下文核对映射，再按授权执行测试。源码扫描目录与关系类型配置在 `traceability/ubproject.toml`；新增 CodeLinks 项目时同步 `traceability/index.rst` 的 `src-trace`。普通验收 ID 原样成为 part ID；含点或以 `PART_` 开头的既有 ID 使用可逆编码，以接口返回的 `needId` 为准。格式依据：[Sphinx-Needs 验收子条目](https://sphinx-needs.readthedocs.io/en/latest/roles.html#need-part-np)、[CodeLinks 源码分析](https://codelinks.useblocks.com/en/sphinx-codelinks-v2.1.0/components/analyse.html)。
 
 查询 `GET /api/node-context?feature=suite&nodeId=avg-compute` 可取得：
 
-- `context.implementation`：该节点的直接函数；`relatedImplementation` 为同一能力的其他节点函数。
+- `context.properties`：行为属性投影，排除身份、标题、布局和源码引用；`context.node` 保留前端使用的扁平字段。
+- `context.implementation`：由精确 spec 标记或 `impl.implements` 解析的直接函数；`relatedImplementation` 为同一能力的其他节点函数。
 - `context.backend`：节点、需求、函数、数据流、声明调用和验收用例的连接。函数身份采用文件＋符号，`signature/startLine/endLine` 来自 CodeLinks；`scopeState: current` 才能作为当前源码定位。
-- `context.backend.testCases`：逐用例的 `passed/failed/skipped/not-run/stale` 和 `verifies`。测试到函数的 `requirement-binding` 表示需求关联；执行覆盖率需要另外采集。
+- `context.backend.testCases`：逐用例的 `passed/failed/skipped/not-run/stale` 和原生 `verifies`。测试到函数的 `requirement-binding` 表示需求关联；执行覆盖率需要另外采集。
+- `context.evidence.executionState`：测试命令的实际结果；`caseCoverage` 单独统计已索引测试条目的结果完整性，未匹配或跳过的条目不会随总体通过而变绿。
 
 内部节点契约与试运行适配器分开：`avg-compute` 接收 `{count, total, steps}`；原 `/api/average/test` 继续接收 `{values}`，由适配器准备前置步骤，输入说明在 `context.backend.trial`。平均值执行结果的 `observedCalls` 记录本次实际调用的步骤函数与结果呈现函数；它与声明调用、图上数据流分别读取。
 
@@ -225,12 +249,13 @@ npm run test:adapters  # 多语言一致性与 HTTP 测试
 
 | 维护内容 | 入口 |
 | --- | --- |
-| 功能图、需求与确认 | `contracts/` |
+| 功能图、需求与确认 | 既有 `contracts/` JSON 或手写 `traceability/*.rst` |
 | 节点／需求保存与追踪视图 | `server/traceability.mjs` |
 | Sphinx 构建、索引读取和引用规范化 | `server/needs-index.mjs`、`scripts/build-index.mjs` |
+| 规格到节点的规则与源写回 | `traceability/node-mapping.json`、`server/needs-projection.mjs` |
 | 功能来源、可信路由与能力登记 | `server/feature-registry.mjs`、`features/*/server.mjs` |
-| 需求、节点、函数及验收用例连接 | `server/backend-relations.mjs`；函数／测试派生视图为 `traceability/backend.rst` |
-| 实际测试报告与有效性 | `server/capabilities.mjs` |
+| 需求、节点、函数及验收用例连接 | `server/backend-relations.mjs`、`server/indexed-tests.mjs`；从索引推导 |
+| 实际测试报告与有效性 | `server/capabilities.mjs`、`scripts/test-case-reporter.mjs` |
 | 平均值与共享数字逻辑 | `server/average.mjs`、`server/numeric-values.mjs` |
 | 原计算能力 | `server/calculator.mjs`、`server/sum.mjs`、`server/expression.mjs` |
 | 工作台与节点面板 | `src/App.tsx`、`src/NodeProperties.tsx`、`src/CapabilityPanel.tsx` |

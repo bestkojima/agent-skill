@@ -7,17 +7,17 @@ description: Use the Contract Studio framework to inspect, change, or implement 
 
 Use a functional node as the unit of work. The framework provides editing, persistence, context export, capability bindings, indexing and evidence; this skill guides the agent through those facilities.
 
-Read the [framework entry points](../../../README.md#agent-的框架入口) and [Sphinx-Needs / CodeLinks usage](../../../README.md#sphinx-needs-与-codelinks-用法) as needed. Consult the [node contract](../../../docs/design/skill-workbench.md) for property semantics.
+Use the [framework entry points](../../../README.md#agent-的框架入口) to discover context and save changes. Before adding requirements, nodes or source markers, read [Sphinx-Needs / CodeLinks usage](../../../README.md#sphinx-needs-与-codelinks-用法). Consult the [node contract](../../../docs/design/skill-workbench.md) for property semantics.
 
 ## Node workflow
 
 1. **Read context.** Query the target node (or parent for a new node): contract, importance, requirements, dependencies, direct implementation, gaps and evidence. Use `context.backend` for function scopes and acceptance-linked cases; keep related functions separate. Reconcile snapshots with saved state and draft previews. For a read-only request, report findings here.
-2. **Save the contract.** Save responsibility, importance (`core` / `key` / `normal`), inputs, outputs, rules, errors, acceptance criteria and requirement links through the framework. Describe actual function inputs separately from trial-adapter inputs. Keep stable acceptance IDs and existing confirmation scope; record new confirmation only from the user. Save the selected contract and task context before implementation.
-3. **Implement and bind.** Within the authorized scope, implement behaviour and tests, plus frontend operations when included. Divide functions by responsibility and preserve callers. Register each node's direct file/symbol bindings and test cases with exact file/name and requirement/acceptance IDs; bind its trusted capability. Keep data-flow edges, declared calls and observed runtime calls distinct.
-4. **Refresh and report.** Add `@need-ids: REQ_…` above implementations and `@need-ids: TEST_…` above registered tests. Run `node scripts/build-index.mjs` to derive RST and build Sphinx-Needs / CodeLinks indexes. Verify affected behaviour within authorization; use current scopes and per-case execution evidence, report gaps and the usable entry.
+2. **Save the contract.** Save responsibility, importance (`core` / `key` / `normal`), inputs, outputs, rules, errors and acceptance criteria to the owning JSON or authored RST source. Use spec fields and native links under `traceability/node-mapping.json`; the framework projects them into nodes and properties. Keep stable IDs and actual confirmation scope. Save the selected contract and task context before implementation.
+3. **Implement with source markers.** Within authorization, implement behaviour, tests and included frontend operations. Reference the exact node spec ID in each function's `@need-ids:` (or a native `impl` with `:implements:`). Declare native `test` needs with `:verifies: REQ.AC` and use `[TEST_ID]` in runtime test names. Register only trusted execution routes, test files and frontend entries; relations come from the index.
+4. **Refresh and report.** Run `node scripts/build-index.mjs`, then read the projected node, function scopes and acceptance-linked cases. Verify affected behaviour within authorization using actual execution evidence. Distinguish internal inputs from trial inputs, data flow from calls, and requirement links from execution coverage; report gaps and the usable entry.
 
 ## Framework invariants
 
-- JSON is the editable authority; node documents, RST and indexes are derived. Browser drafts become project state only when saved.
+- Edit each item's owning source: existing JSON contracts or authored Needs RST. Generated RST, node documents and indexes are derived; layout is separate from behaviour. Browser drafts become project state only when saved.
 - Graph edits specify behaviour; execution requires a real capability binding. Keep unbound nodes pending and executable commands in the trusted registry.
 - Requirement confirmation, source/index freshness and observed test results are separate states. Report the framework's actual state, including failed builds, stale evidence and unconnected tools.

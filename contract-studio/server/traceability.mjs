@@ -5,7 +5,8 @@ import { isDeepStrictEqual } from 'node:util';
 import { readNeedsIndex, buildNeedsIndex, indexConfigured } from './needs-index.mjs';
 import { nodeImportance } from '../src/node-importance.mjs';
 import { featureRegistry } from './feature-registry.mjs';
-import { backendRelations, backendNeedsText, nodeNeedId, acceptancePartId } from './backend-relations.mjs';
+import { backendRelations, nodeNeedId, acceptancePartId } from './backend-relations.mjs';
+import { mappingRules, nodeProperties, projectNeedsGraph, projectedRequirements, saveProjectedGraph, updateNeedSource } from './needs-projection.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 function featureConfig(featureId) {
@@ -56,7 +57,7 @@ async function loadRequirements(root, feature = featureConfig()) {
   return data;
 }
 
-export function validateGraph(graph, featureId) {
+export function validateGraph(graph, featureId, externalIds = []) {
   if (!graph || typeof graph !== 'object' || graph.version !== 2 || graph.feature?.id !== featureId || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) throw new TraceError('功能图格式或 featureId 不匹配');
   if (typeof graph.feature.title !== 'string' || typeof graph.feature.goal !== 'string') throw new TraceError('功能图缺少标题或目标');
   const ids = new Set();
@@ -65,8 +66,9 @@ export function validateGraph(graph, featureId) {
     try { nodeImportance(node.importance); } catch (error) { throw new TraceError(`${node.id}: ${error.message}`); }
     ids.add(node.id);
   }
+  const endpoints = new Set([...ids,...externalIds]);
   for (const node of graph.nodes) {
-    if (node.parentId && !ids.has(node.parentId)) throw new TraceError(`功能图包含未找到的父节点: ${node.parentId}`);
+    if (node.parentId && !endpoints.has(node.parentId)) throw new TraceError(`功能图包含未找到的父节点: ${node.parentId}`);
     const parents = new Set([node.id]);
     let parent = node.parentId;
     while (parent) {
@@ -77,7 +79,7 @@ export function validateGraph(graph, featureId) {
   }
   const edgeIds = new Set();
   for (const edge of graph.edges) {
-    if (typeof edge.id !== 'string' || !edge.id || edgeIds.has(edge.id) || !ids.has(edge.source) || !ids.has(edge.target)) throw new TraceError(`功能图边 ID 或端点无效: ${edge.id}`);
+    if (typeof edge.id !== 'string' || !edge.id || edgeIds.has(edge.id) || !endpoints.has(edge.source) || !endpoints.has(edge.target)) throw new TraceError(`功能图边 ID 或端点无效: ${edge.id}`);
     edgeIds.add(edge.id);
   }
   return graph;
@@ -85,7 +87,8 @@ export function validateGraph(graph, featureId) {
 
 async function loadGraph(root, featureId, feature = featureConfig(featureId)) {
   const { graphFile } = feature;
-  return validateGraph(JSON.parse(await fs.readFile(path.join(root, graphFile), 'utf8')), featureId);
+  const graph=JSON.parse(await fs.readFile(path.join(root, graphFile), 'utf8'));
+  return validateGraph(graph, featureId, Object.keys(graph._needsLayout??{}));
 }
 
 // Saving is a new operation: enforce the existing contract checker without
@@ -105,7 +108,7 @@ function rstText(data, graph, feature = featureConfig()) {
   const { requirementFile, graphFile } = feature;
   const esc = (s) => s.replaceAll('\\', '\\\\').replaceAll('*', '\\*').replaceAll('`', '\\`').replaceAll('|', '\\|').replaceAll('_', '\\_');
   // Hex-encoded UTF-8 is reversible and collision-free, including case and punctuation.
-  const functionId = nodeId => nodeNeedId(nodeId,feature);
+  const functionId = nodeId => graph._needsLayout?.[nodeId]?.needId ?? nodeNeedId(nodeId,feature);
   const lines = ['需求与功能图', '============', '', `.. 由 ${requirementFile} 和 ${graphFile} 生成；请修改源文件或使用工作台，不要直接编辑。`, '', '需求条目', '--------', ''];
   for (const r of (feature.requirementSources?.length ? data.requirements.filter(r => !r.sourceFeatureId) : data.requirements)) {
     lines.push(`.. req:: ${esc(r.title)}`, `   :id: ${r.id}`, `   :status: ${r.status}`, '', ...r.description.split('\n').map(line => `   ${esc(line)}`), '');
@@ -164,21 +167,22 @@ async function exportBuildSources(root, featureId) {
   }
 }
 
-async function backendModels(root) {
-  const models=[];
+async function exportNodeProperties(root) {
+  const lines=[':orphan:','','节点字段投影','============','','.. 由契约源生成的 needextend 字段；请编辑契约源。',''];
   for(const feature of featureRegistry.features) {
     try { await fs.access(path.join(root,feature.requirementFile));await fs.access(path.join(root,feature.graphFile)); }
     catch(error) { if(error.code==='ENOENT')continue;throw error; }
     const data=await combinedRequirements(root,feature);
     const graph=await loadGraph(root,data.featureId,feature);
-    models.push(backendRelations(graph,data.requirements,{feature}));
+    for(const node of graph.nodes)lines.push(`.. needextend:: ${nodeNeedId(node.id,feature)}`,
+      `   :feature_id: ${graph.feature.id}`,`   :node_id: ${node.id}`,
+      `   :contract_source: ${feature.graphFile}`,
+      ...(node.parentId?[`   :parent_spec: ${graph._needsLayout?.[node.parentId]?.needId??nodeNeedId(node.parentId,feature)}`]:[]),
+      `   :node_properties: ${JSON.stringify(nodeProperties(node))}`,
+      `   :node_edges: ${JSON.stringify(graph.edges.filter(edge=>edge.source===node.id))}`,'');
   }
-  return models;
-}
-
-async function exportBackendNeeds(root) {
-  const text=backendNeedsText(await backendModels(root));
-  const target=path.join(root,'traceability/backend.rst');
+  const text=lines.join('\n');
+  const target=path.join(root,'traceability/node-properties.rst');
   try { if(await fs.readFile(target,'utf8')===text)return; }
   catch(error) { if(error.code!=='ENOENT')throw error; }
   await fs.mkdir(path.dirname(target),{recursive:true});
@@ -186,7 +190,7 @@ async function exportBackendNeeds(root) {
 }
 
 async function refreshIndex(root,options) {
-  await exportBackendNeeds(root);
+  await exportNodeProperties(root);
   return buildNeedsIndex(root,options);
 }
 
@@ -214,10 +218,10 @@ export async function traceability(root = projectRoot, featureId) {
   const feature = featureConfig(featureId);
   const data = await combinedRequirements(root, feature);
   if (featureId !== undefined && data.featureId !== featureId) throw new TraceError('需求文件的功能 ID 不匹配');
-  const graph = await loadGraph(root, data.featureId, feature);
+  const sourceGraph = await loadGraph(root, data.featureId, feature);
   const {index, needs, refs, entities=[]} = await readNeedsIndex(root);
   let sphinxState = 'missing';
-  try { sphinxState = (await fs.readFile(path.join(root, feature.rstFile), 'utf8')) === rstText(data, graph, feature) ? 'current' : 'outdated'; }
+  try { sphinxState = (await fs.readFile(path.join(root, feature.rstFile), 'utf8')) === rstText(data, sourceGraph, feature) ? 'current' : 'outdated'; }
   catch (e) { if (e.code !== 'ENOENT') throw e; }
   let indexSourcesCurrent=sphinxState==='current';
   if(index.state==='current' && indexSourcesCurrent && feature.requirementSources?.length) {
@@ -232,15 +236,27 @@ export async function traceability(root = projectRoot, featureId) {
   if(index.state==='current'&&!indexSourcesCurrent) {
     index.state='stale';index.message='需求源与 RST 未同步，索引尚未包含当前源内容。';
   }
-  const backend=backendRelations(graph,data.requirements,{feature,entities:entities.map(entity=>({...entity,indexState:index.state}))});
+  const rules=await mappingRules(root);
+  const graphNeeds=index.state==='current'?needs:Object.fromEntries(Object.entries(needs).filter(([,need])=>!sourceGraph.nodes.some(node=>nodeNeedId(node.id,feature)===need.id)));
+  const graph=projectNeedsGraph(sourceGraph,graphNeeds,feature,rules,entities,refs);
+  if(index.state==='current')validateGraph(graph,data.featureId);
+  const requirements=projectedRequirements(data.requirements,graph,needs,rules);
+  const backend=backendRelations(graph,requirements,{feature,needs,entities:entities.map(entity=>({...entity,indexState:index.state}))});
   const relations = Object.values(needs).filter(need => need.type === 'spec').map(need => ({id:need.id,title:need.title,importance:nodeImportance(need.importance),fulfills:need.fulfills??[],contains:need.contains??[],flowsTo:need.flows_to??[]}));
+  const requirementRefs=id=>{
+    const related=backend.functions.filter(fn=>fn.requirementIds.includes(id));
+    const tests=backend.testCases.filter(test=>test.verifies.some(link=>link.requirementId===id));
+    const implementation=related.flatMap(fn=>fn.needIds.flatMap(id=>refs.get(id)??[]).filter(ref=>ref.path===fn.path&&fn.markerLines.includes(ref.line)));
+    const found=[...(refs.get(id)??[]),...implementation,...tests.flatMap(test=>refs.get(test.id)??[])];
+    return [...new Map(found.map(ref=>[`${ref.path}:${ref.line}`,ref])).values()];
+  };
   return { featureId: data.featureId, source: feature.requirementFile, projectGraph: graph, sphinx: { path: feature.rstFile, state: sphinxState }, index, relations, backend,
     ubcode: {state:'not-connected',message:'未接入（可选）'},
-    requirements: data.requirements.map(r => ({ ...r,
-      ...(index.state === 'current' && needs[r.id] ? {title:needs[r.id].title,description:r.description,status:needs[r.id].status} : {}),
+    requirements: requirements.map(r => ({ ...r,
+      ...(index.state === 'current' && needs[r.id] && !r.sourceDocument ? {title:needs[r.id].title,description:r.description,status:needs[r.id].status} : {}),
       nodeIds:nodeIdsOf(r), acceptance:acceptanceOf(r), acceptanceStatus:r.acceptanceStatus??'draft',
-      code: (refs.get(r.id) ?? []).filter(ref => !ref.path.startsWith('tests/')),
-      tests: (refs.get(r.id) ?? []).filter(ref => ref.path.startsWith('tests/')) })) };
+      code: requirementRefs(r.id).filter(ref => !ref.path.startsWith('tests/')),
+      tests: requirementRefs(r.id).filter(ref => ref.path.startsWith('tests/')) })) };
 }
 
 let saveQueue = Promise.resolve();
@@ -248,6 +264,47 @@ function serialized(fn) {
   const task = saveQueue.then(fn);
   saveQueue = task.catch(() => {});
   return task;
+}
+
+function applyRequirementUpdate(item,body,nodeIds,acceptance) {
+  if(item.revision!==body.revision)throw new TraceError('需求已被其他操作修改，请刷新后重试',409);
+  const title=body.title.trim(),description=body.description.trim().replaceAll('\r\n','\n');
+  const changed=item.title!==title||item.description!==description;
+  const acceptanceChanged=acceptance!==undefined&&!isDeepStrictEqual(acceptanceOf(item),acceptance);
+  const linksChanged=nodeIds!==undefined&&!isDeepStrictEqual(nodeIdsOf(item),nodeIds);
+  const confirmAcceptance=body.confirmAcceptance===true;
+  if(!(changed||linksChanged||acceptanceChanged||confirmAcceptance||(body.action==='confirm'&&item.status!=='confirmed')))return;
+  Object.assign(item,{title,description,revision:item.revision+1});
+  if(changed||body.action==='confirm')item.status=body.action==='confirm'?'confirmed':'draft';
+  if(body.action==='confirm') {
+    item.confirmedAt=new Date().toISOString();item.confirmedText={title,description};
+  } else if(changed) {delete item.confirmedAt;delete item.confirmedText;}
+  if(nodeIds){item.nodeIds=nodeIds;item.nodeId=nodeIds[0];}
+  if(acceptance!==undefined)item.acceptance=acceptance;
+  if(acceptanceChanged||confirmAcceptance) {
+    item.acceptanceStatus=confirmAcceptance?'confirmed':'draft';
+    if(confirmAcceptance){item.confirmedAcceptance=acceptanceOf(item);item.acceptanceConfirmedAt=new Date().toISOString();}
+    else {delete item.confirmedAcceptance;delete item.acceptanceConfirmedAt;}
+  }
+}
+
+async function updateAuthoredRequirement(root,body,nodeIds,acceptance) {
+  const view=await traceability(root,body.featureId);
+  const item=view.requirements.find(req=>req.id===body.id&&req.sourceDocument);
+  if(!item)throw new TraceError('Requirement not found',404);
+  if(view.index.state!=='current')throw new TraceError('原生需求索引已过期，请先重建索引再保存',409);
+  // The relationship is owned by spec.fulfills, never a second requirement-side table.
+  if(nodeIds&&!isDeepStrictEqual(nodeIdsOf(item),nodeIds))throw new TraceError('请在规格文档中修改 fulfills 关联，再重建索引');
+  applyRequirementUpdate(item,body,undefined,acceptance);
+  const {needs}=await readNeedsIndex(root);
+  const {id,title,description,nodeId,nodeIds:linked,sourceDocument,code,tests,acceptance:criteria,status,...metadata}=item;
+  metadata.acceptanceDetails=Object.fromEntries(criteria.map(({id,input,observable})=>[id,{input,...(observable!==undefined?{observable}:{})}]));
+  const esc=text=>text.replaceAll('\\','\\\\').replaceAll('`','\\`').replaceAll('\n',' ');
+  const parts=criteria.map(ac=>`* :need_part:\`(${acceptancePartId(ac.id)}) ${esc(ac.expected)}\``);
+  await updateNeedSource(root,needs[id],{title,options:{status,requirement_properties:JSON.stringify(metadata)},
+    body:[description,...(parts.length?['',...parts]:[])].join('\n')});
+  await refreshIndex(root);
+  return traceability(root,body.featureId);
 }
 
 export function updateRequirement(body, root = projectRoot) {
@@ -270,45 +327,16 @@ export function updateRequirement(body, root = projectRoot) {
     if (body.action === 'create') {
       const linked = nodeIds ?? validateNodeIds([body.nodeId]);
       if (body.featureId !== data.featureId || !/^REQ_[A-Z0-9_]+$/.test(body.id) || body.id.length > 100) throw new TraceError('需求 ID 或功能节点 ID 不合法');
-      if (data.requirements.some(r => r.id === body.id)) throw new TraceError('需求 ID 已存在', 409);
+      if (data.requirements.some(r => r.id === body.id)||(await readNeedsIndex(root)).needs[body.id]) throw new TraceError('需求 ID 已存在', 409);
       data.requirements.push({id: body.id, nodeId: linked[0], ...(nodeIds?{nodeIds}:{}), title: body.title.trim(), description: body.description.trim().replaceAll('\r\n', '\n'), status: 'draft', revision: 1,...(acceptance?{acceptance,acceptanceStatus:'draft'}:{})});
       await persist(root, data, feature);
       if (await indexConfigured(root)) await refreshIndex(root);
       return traceability(root, featureId);
     }
     const item = data.requirements.find(r => r.id === body.id);
-    if (!item) throw new TraceError('Requirement not found', 404);
-    if (item.revision !== body.revision) throw new TraceError('需求已被其他操作修改，请刷新后重试', 409);
-    const title = body.title.trim();
-    const description = body.description.trim().replaceAll('\r\n', '\n');
-    const changed = item.title !== title || item.description !== description;
-    const acceptanceChanged = acceptance !== undefined && !isDeepStrictEqual(acceptanceOf(item), acceptance);
-    const linksChanged = nodeIds !== undefined && !isDeepStrictEqual(nodeIdsOf(item), nodeIds);
-    const confirmAcceptance = body.confirmAcceptance === true;
-    if (changed || linksChanged || acceptanceChanged || confirmAcceptance || (body.action === 'confirm' && item.status !== 'confirmed')) {
-      item.title = title;
-      item.description = description;
-      if (changed || body.action === 'confirm') item.status = body.action === 'confirm' ? 'confirmed' : 'draft';
-      item.revision += 1;
-      if (body.action === 'confirm') {
-        item.confirmedAt = new Date().toISOString();
-        item.confirmedText = { title, description };
-      } else if (changed) {
-        delete item.confirmedAt;
-        delete item.confirmedText;
-      }
-      if (nodeIds) { item.nodeIds=nodeIds;item.nodeId=nodeIds[0]; }
-      if (acceptance !== undefined) item.acceptance=acceptance;
-      if (acceptanceChanged || confirmAcceptance) {
-        item.acceptanceStatus=confirmAcceptance?'confirmed':'draft';
-        if(confirmAcceptance){item.confirmedAcceptance=acceptanceOf(item);item.acceptanceConfirmedAt=new Date().toISOString();}
-        else {delete item.confirmedAcceptance;delete item.acceptanceConfirmedAt;}
-      }
-      await persist(root, data, feature);
-    } else {
-      // Re-sync a missing or externally edited derived view on an explicit save.
-      await persist(root, data, feature);
-    }
+    if (!item) return updateAuthoredRequirement(root,body,nodeIds,acceptance);
+    applyRequirementUpdate(item,body,nodeIds,acceptance);
+    await persist(root,data,feature);
     if (isCombined && owner) await exportNeeds(root, body.featureId);
     if (await indexConfigured(root)) await refreshIndex(root);
     return traceability(root, isCombined ? body.featureId : featureId);
@@ -321,13 +349,16 @@ export function updateGraph(body, root = projectRoot) {
     const feature = featureConfig(body.featureId);
     const data = await loadRequirements(root, feature);
     if (body.featureId !== data.featureId) throw new TraceError('功能图不匹配');
-    const current = await loadGraph(root, data.featureId, feature);
-    if (!isDeepStrictEqual(current, body.expectedGraph)) throw new TraceError('项目图已被其他操作修改，请先处理冲突', 409);
+    const source = await loadGraph(root, data.featureId, feature);
+    const currentView=await traceability(root,data.featureId);
+    const current=currentView.projectGraph;
+    const comparable=graph=>({...graph,nodes:graph.nodes.map(({needId,code,test,properties,...node})=>node)});
+    if (!isDeepStrictEqual(comparable(current), comparable(body.expectedGraph))) throw new TraceError('项目图已被其他操作修改，请先处理冲突', 409);
     const graph = validateGraphForSave(body.graph, data.featureId);
-    const target = path.join(root, feature.graphFile);
-    const temp = `${target}.${process.pid}.tmp`;
-    await fs.writeFile(temp, JSON.stringify(graph, null, 2) + '\n', 'utf8');
-    await fs.rename(temp, target);
+    const native=current.nodes.some(node=>!source.nodes.some(item=>item.id===node.id));
+    if(native&&currentView.index.state!=='current')throw new TraceError('原生规格索引已过期，请先重建索引再保存',409);
+    const {needs}=await readNeedsIndex(root);
+    await saveProjectedGraph(root,feature,source,current,graph,needs,await mappingRules(root));
     await exportNeeds(root, data.featureId);
     if (await indexConfigured(root)) await refreshIndex(root);
     return traceability(root, data.featureId);

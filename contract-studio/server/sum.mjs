@@ -1,11 +1,11 @@
 import { parseFiniteValues, accumulateValues } from './numeric-values.mjs';
 
-// @need-ids: REQ_SUM_INPUT
+// @need-ids: REQ_SUM_INPUT, FUNC_SUITE_73756D2D696E707574, FUNC_73756D2D696E707574
 export function captureSumInput(raw) {
   return { status: 'received', draft: raw && typeof raw === 'object' ? raw : {} };
 }
 
-// @need-ids: REQ_SUM_VALIDATE
+// @need-ids: REQ_SUM_VALIDATE, FUNC_SUITE_73756D2D76616C6964617465, FUNC_73756D2D76616C6964617465
 export function validateSumInput(raw) {
   if (!Array.isArray(raw?.values) || raw.values.length < 3) {
     return { status: 'invalid', message: '请至少输入 3 个数字。' };
@@ -13,7 +13,7 @@ export function validateSumInput(raw) {
   return parseFiniteValues(raw.values);
 }
 
-// @need-ids: REQ_SUM_ACCUMULATE
+// @need-ids: REQ_SUM_ACCUMULATE, FUNC_SUITE_73756D2D616363756D756C617465, FUNC_73756D2D616363756D756C617465
 export function accumulateSum(input) {
   const result = accumulateValues(input.values);
   if (result.status === 'invalid') return result;
@@ -21,12 +21,12 @@ export function accumulateSum(input) {
   return { status: 'success', value: total, message: `求和结果：${total}`, steps };
 }
 
-// @need-ids: REQ_SUM_RESULT
+// @need-ids: REQ_SUM_RESULT, FUNC_SUITE_73756D2D726573756C74, FUNC_73756D2D726573756C74
 export function sumUi(result) {
   return { tone: result.status === 'success' ? 'success' : 'error', message: result.message };
 }
 
-// @need-ids: REQ_SUM_ALL
+// @need-ids: REQ_SUM_ALL, FUNC_SUITE_73756D, FUNC_73756D
 export async function runSum(raw, mode = 'dry-run') {
   if (!['dry-run', 'sandbox'].includes(mode)) throw Error('Unknown mode');
   const trace = [];

@@ -1,6 +1,6 @@
 import { parseFiniteValues, accumulateValues } from './numeric-values.mjs';
 
-// @need-ids: REQ_AVERAGE_VALIDATE
+// @need-ids: REQ_AVERAGE_VALIDATE, FUNC_SUITE_6176672D76616C6964617465
 export function validateAverageInput(raw) {
   if (!Array.isArray(raw?.values) || raw.values.length === 0) {
     return { status: 'invalid', code: 'EMPTY_INPUT', message: '请至少输入 1 个数字。' };
@@ -15,7 +15,7 @@ function calculationSteps(steps) {
   }));
 }
 
-// @need-ids: REQ_AVERAGE_ACCUMULATE
+// @need-ids: REQ_AVERAGE_ACCUMULATE, FUNC_SUITE_6176672D616363756D756C617465
 export function accumulateAverage(input) {
   const accumulated = accumulateValues(input.values);
   const steps = calculationSteps(accumulated.steps);
@@ -26,7 +26,7 @@ export function accumulateAverage(input) {
     message: `已累加 ${input.values.length} 个数字，总和：${accumulated.total}` };
 }
 
-// @need-ids: REQ_AVERAGE_COMPUTE
+// @need-ids: REQ_AVERAGE_COMPUTE, FUNC_SUITE_6176672D636F6D70757465
 export function computeAverage(accumulated) {
   const { count, total, steps } = accumulated;
   const value = total / count;
@@ -42,7 +42,7 @@ export function averageUi(result) {
   return { tone: result.status === 'success' ? 'success' : 'error', message: result.message };
 }
 
-// @need-ids: REQ_AVERAGE_ALL
+// @need-ids: REQ_AVERAGE_ALL, FUNC_SUITE_61766572616765
 export async function runAverage(raw, mode = 'dry-run') {
   if (!['dry-run', 'sandbox'].includes(mode)) throw Error('Unknown mode');
   const trace = [];
