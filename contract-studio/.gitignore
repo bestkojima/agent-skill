@@ -1,9 +1,0 @@
-node_modules/
-.venv/
-dist/
-*.log
-.env
-server/adapters/_build/
-server/adapters/impl/rust/Cargo.lock
-
-traceability/_build/
