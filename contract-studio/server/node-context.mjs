@@ -9,6 +9,7 @@ import { nodeBackend } from './backend-relations.mjs';
 import { nodeProperties } from './needs-projection.mjs';
 import { featureRegistry } from './feature-registry.mjs';
 import { readProjectEvidence } from './project-evidence.mjs';
+import { projectTestPlan } from './project-test-plan.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const normalizeNode = node => node ? {...node, importance:nodeImportance(node.importance)} : null;
@@ -35,6 +36,7 @@ function gapsFor(node, requirements, capability, index, evidence, backend, publi
   }
   if (published) {
     if (!backend.functions.length) add('implementation.missing','在实际函数旁引用该节点的规格 ID，并刷新索引');
+    if (!backend.testCases.some(test=>test.scope==='direct')) add('tests.scope','在直接验收此节点的测试里，用 verifies 引用该节点的规格 ID');
   } else if (!capability) add('capability.missing',node.capabilityId?`能力 ${node.capabilityId} 尚未登记`:'实现并登记可信能力');
   else {
     if (!backend.functions.length) add('implementation.missing','在实际函数旁引用该节点的规格 ID，并刷新索引');
@@ -83,7 +85,7 @@ function formatDocument(context) {
     ].join('\n')).join('\n\n')||'待关联'}`,
     `## 实现函数\n${context.implementation.map(ref=>`- ${ref.path}#${ref.symbol} · ${ref.startLine??'?'}–${ref.endLine??'?'} · ${ref.scopeState}`).join('\n')||'待实现'}`,
     `## 实现关系\n${context.backend.calls.map(call=>`- 声明调用：${call.callerRef.path}#${call.callerRef.symbol} → ${call.calleeRef.path}#${call.calleeRef.symbol}`).join('\n')||'未发现 calls 声明'}\n业务出入边表达数据流。${context.backend.trial?'\n试运行适配器：'+context.backend.trial.description+schema(context.backend.trial.inputSchema):''}`,
-    `## 验收用例\n${context.backend.testCases.map(test=>`- ${test.id} · ${test.name} · ${test.state}\n  ${test.verifies.map(link=>link.needId+' ['+link.state+']').join(', ')}`).join('\n')||'尚未解析到 verifies 测试条目'}`,
+    `## 验收用例\n${context.backend.testCases.map(test=>`- ${test.id} · ${test.name} · ${test.scope==='direct'?'直接验证本节点':'同一需求下的相关用例'} · ${test.state}\n  ${test.verifies.map(link=>link.needId+' ['+link.state+']').join(', ')}`).join('\n')||'尚未解析到 verifies 测试条目'}`,
     `## 前端入口\n${context.frontend?`${context.frontend.component} · ${context.frontend.path} · 模式 ${context.frontend.mode??'默认'}`:'前端待接入'}`,
     `## 源码定位\n${refs(context.code)||'待关联'}`,
     `## 相关测试\n${refs(context.tests)||capability?.testFiles?.join('\n')||'待关联'}`,
@@ -128,6 +130,7 @@ export async function nodeContext({featureId,nodeId,graph:preview} = {}, root = 
   const evidence = published ? await readProjectEvidence(root,published.path,nodeBackend(view.backend,nodeId).testCases,{
     stale:semanticChanges||saved.index.state!=='current',
     sourceRevision:Object.entries(saved.index.sourceRevision??{}).filter(([file])=>file.startsWith(published.directory)),
+    summarizeDirect:true,
   }) : savedEvidence && evidenceContractChanges ? {...savedEvidence,
     state:savedEvidence.state==='not-run'?'not-run':'stale',
     cases:savedEvidence.cases?.map(test=>test.state==='not-run'?test:{...test,observedState:test.observedState??test.state,state:'stale'}),
@@ -135,6 +138,7 @@ export async function nodeContext({featureId,nodeId,graph:preview} = {}, root = 
     message:'当前草稿中该能力的行为契约已变化；项目测试记录尚未覆盖这份草稿。'
   } : savedEvidence ? {...savedEvidence,coversCurrentGraph:savedEvidence.state==='passed'} : null;
   const backend=nodeBackend(view.backend,nodeId,evidence);
+  const testPlan=published?.runner?projectTestPlan(published,saved.index,backend.testCases):null;
   const context = {
     feature:graph.feature,node,properties:nodeProperties(node),parent:ancestors.at(-1)??null,ancestors,incoming,outgoing,children,
     internalEdges:graph.edges.filter(edge=>childIds.has(edge.source)&&childIds.has(edge.target)),
@@ -144,6 +148,7 @@ export async function nodeContext({featureId,nodeId,graph:preview} = {}, root = 
     provenance:{graph:draft?'draft':'saved',requirements:'saved',semanticChanges,evidenceContractChanges},
     source:saved.source,index:saved.index,sphinx:saved.sphinx,ubcode:saved.ubcode,
     evidence,savedEvidence,
+    ...(testPlan?{testRun:{available:!testPlan.reason,reason:testPlan.reason}}:{}),
     gaps:gapsFor(node,requirements,capability,saved.index,evidence,backend,published)
   };
   const markdown = formatDocument(context);

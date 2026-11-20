@@ -4,6 +4,7 @@ import { indexedCapabilities, capabilityEvidence, runCapabilityTests } from './c
 
 import { featureRegistry, featureCatalog, featureSource } from './feature-registry.mjs';
 import { nodeContext } from './node-context.mjs';
+import { runProjectNodeTests } from './project-node-tests.mjs';
 
 function registeredFeature(value) {
   const feature=value==null?featureRegistry.defaultTrace:featureRegistry.resolveFeature(value);
@@ -43,6 +44,13 @@ export async function api(req, res, next) {
     if(req.method==='GET'&&url.pathname==='/api/node-context') {
       if(!isLocalRequest(req))return reply(res,403,{error:'Only same-origin local requests are allowed'});
       return reply(res,200,await nodeContext({featureId:registeredFeature(url.searchParams.get('feature')).id,nodeId:url.searchParams.get('nodeId')}));
+    }
+    if(req.method==='POST'&&url.pathname==='/api/node-tests/run') {
+      if(!isLocalWrite(req)||!req.headers.origin)return reply(res,403,{error:'仅允许本机同源页面运行节点测试'});
+      const body=await jsonBody(req,1024);
+      if(typeof body?.featureId!=='string'||typeof body?.nodeId!=='string'||Object.keys(body).length!==2)
+        throw new TraceError('只接受项目和节点 ID');
+      return reply(res,200,await runProjectNodeTests(registeredFeature(body.featureId),body.nodeId));
     }
     if(req.method==='POST'&&url.pathname==='/api/node-context/preview') {
       if(!isLocalWrite(req))return reply(res,403,{error:'Only same-origin local JSON updates are allowed'});

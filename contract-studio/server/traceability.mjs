@@ -38,6 +38,7 @@ export class TraceError extends Error {
 
 async function loadRequirements(root, feature = featureConfig()) {
   const { requirementFile } = feature;
+  if(!requirementFile)return {version:1,featureId:feature.id,requirements:[]};
   const data = JSON.parse(await fs.readFile(path.join(root, requirementFile), 'utf8'));
   if (data.version !== 1 || !Array.isArray(data.requirements)) throw new Error('Invalid requirements data');
   // An out-of-band edit to confirmed content must not inherit the old approval.
@@ -110,7 +111,7 @@ function rstText(data, graph, feature = featureConfig()) {
   const esc = (s) => s.replaceAll('\\', '\\\\').replaceAll('*', '\\*').replaceAll('`', '\\`').replaceAll('|', '\\|').replaceAll('_', '\\_');
   // Hex-encoded UTF-8 is reversible and collision-free, including case and punctuation.
   const functionId = nodeId => graph._needsLayout?.[nodeId]?.needId ?? nodeNeedId(nodeId,feature);
-  const lines = ['需求与功能图', '============', '', `.. 由 ${requirementFile} 和 ${graphFile} 生成；请修改源文件或使用工作台，不要直接编辑。`, '', '需求条目', '--------', ''];
+  const lines = [':orphan:', '', '需求与功能图', '============', '', `.. 由 ${requirementFile} 和 ${graphFile} 生成；请修改源文件或使用工作台，不要直接编辑。`, '', '需求条目', '--------', ''];
   for (const r of (feature.requirementSources?.length ? data.requirements.filter(r => !r.sourceFeatureId) : data.requirements)) {
     lines.push(`.. req:: ${esc(r.title)}`, `   :id: ${r.id}`, `   :status: ${r.status}`, '', ...r.description.split('\n').map(line => `   ${esc(line)}`), '');
     if (acceptanceOf(r).length) {
@@ -142,6 +143,7 @@ function rstText(data, graph, feature = featureConfig()) {
 
 export async function exportNeeds(root = projectRoot, featureId) {
   const feature = featureConfig(featureId);
+  if(!feature.requirementFile)return;
   const data = await combinedRequirements(root, feature);
   const graph = await loadGraph(root, data.featureId, feature);
   const target = path.join(root, feature.rstFile);
@@ -157,6 +159,7 @@ async function exportBuildSources(root, featureId) {
     : [...(featureConfig(featureId).requirementSources??[]),featureId];
   for(const id of selected) {
     const feature = featureConfig(id);
+    if(!feature.requirementFile)continue;
     // Standalone fixtures may only contain their own source pair.
     // Explicit rebuilding never asks them to create unrelated example files.
     let present=true;
@@ -169,8 +172,10 @@ async function exportBuildSources(root, featureId) {
 }
 
 async function exportNodeProperties(root) {
+  const legacyFeatures=featureRegistry.features.filter(feature=>feature.requirementFile);
+  if(!legacyFeatures.length)return;
   const lines=[':orphan:','','节点字段投影','============','','.. 由契约源生成的 needextend 字段；请编辑契约源。',''];
-  for(const feature of featureRegistry.features) {
+  for(const feature of legacyFeatures) {
     try { await fs.access(path.join(root,feature.requirementFile));await fs.access(path.join(root,feature.graphFile)); }
     catch(error) { if(error.code==='ENOENT')continue;throw error; }
     const data=await combinedRequirements(root,feature);
@@ -232,18 +237,26 @@ export async function openTraceability(root = projectRoot) {
       const graph=await sourceGraph(feature);
       validateGraph(graph,data.featureId,Object.keys(graph._needsLayout??{}));
       let state='missing';
-      try { state=await fs.readFile(path.join(root,feature.rstFile),'utf8')===rstText(data,graph,feature)?'current':'outdated'; }
-      catch(error) { if(error.code!=='ENOENT')throw error; }
-      return {data,graph,state};
+      const rstPath=feature.requirementFile?feature.rstFile:feature.requirementsSource;
+      try {
+        if(feature.requirementFile) {
+          state=await fs.readFile(path.join(root,rstPath),'utf8')===rstText(data,graph,feature)?'current':'outdated';
+        } else {
+          await fs.access(path.join(root,rstPath));
+          state='current';
+        }
+      } catch(error) { if(error.code!=='ENOENT')throw error; }
+      return {data,graph,sphinx:{path:rstPath,state}};
     })());
     return sources.get(feature.id);
   }
   // A successful build of old RST cannot certify newer JSON. This check applies
   // equally to source navigation, capability evidence and graph/draft queries.
   if(index.state==='current')for(const feature of featureRegistry.features) {
+    if(!feature.requirementFile)continue; // Authored RST already participates in the index revision.
     try { await fs.access(path.join(root,feature.graphFile));await fs.access(path.join(root,feature.requirementFile)); }
     catch(error) { if(error.code==='ENOENT')continue;throw error; }
-    if((await sourceRecord(feature)).state!=='current') {
+    if((await sourceRecord(feature)).sphinx.state!=='current') {
       index.state='stale';index.message='需求源与 RST 未同步，索引尚未包含当前源内容。';
     }
   }
@@ -266,7 +279,7 @@ export async function openTraceability(root = projectRoot) {
   async function featureView(featureId,{graph:preview}={}) {
     const feature=featureConfig(featureId);
     if(!views.has(feature.id))views.set(feature.id,(async()=>{
-      const {data,state}=await sourceRecord(feature);
+      const {data,sphinx}=await sourceRecord(feature);
       const graph=await graphView(feature);
       if(index.state==='current')validateGraph(graph,data.featureId);
       const requirements=projectedRequirements(data.requirements,graph,needs,defaultMappingRules);
@@ -278,7 +291,7 @@ export async function openTraceability(root = projectRoot) {
         const found=[...(refs.get(id)??[]),...implementation,...tests.flatMap(test=>refs.get(test.id)??[])];
         return [...new Map(found.map(ref=>[`${ref.path}:${ref.line}`,ref])).values()];
       };
-      return {featureId:data.featureId,source:feature.requirementsSource??feature.requirementFile,projectGraph:graph,sphinx:{path:feature.rstFile,state},index,backend,
+      return {featureId:data.featureId,source:feature.requirementsSource??feature.requirementFile,projectGraph:graph,sphinx,index,backend,
         relations:Object.values(needs).filter(need=>need.type==='spec').map(need=>({id:need.id,title:need.title,importance:nodeImportance(need.importance),fulfills:need.fulfills??[],contains:need.contains??[],flowsTo:need.flows_to??[]})),
         ubcode:{state:'not-connected',message:'未接入（可选）'},
         requirements:requirements.map(r=>({...r,
@@ -395,11 +408,14 @@ async function updateAuthoredRequirement(root,body,nodeIds,acceptance) {
 export function updateRequirement(body, root = projectRoot) {
   return serialized(async () => {
     if (!body || !['save', 'confirm', 'create'].includes(body.action) || typeof body.id !== 'string') throw new TraceError('Invalid update request');
+    const requested=featureConfig(body.featureId);
+    if(requested.publishedTests)throw new TraceError('请在独立项目中修改需求或节点规格',403);
+    if(body.action==='create'&&!requested.requirementFile)throw new TraceError('请在原生 RST 中声明需求',403);
     if (body.action !== 'create' && !Number.isInteger(body.revision)) throw new TraceError('Invalid revision');
     if (typeof body.title !== 'string' || !body.title.trim() || body.title.length > 200 || /[\r\n]/.test(body.title)) throw new TraceError('需求标题须为 1–200 字且不能换行');
     if (typeof body.description !== 'string' || !body.description.trim() || body.description.length > 5000) throw new TraceError('需求描述须为 1–5000 字');
-    const isCombined = Boolean(featureConfig(body.featureId).requirementSources?.length);
-    const combined = isCombined ? await combinedRequirements(root, featureConfig(body.featureId)) : null;
+    const isCombined = Boolean(requested.requirementSources?.length);
+    const combined = isCombined ? await combinedRequirements(root, requested) : null;
     if (isCombined && body.action === 'create' && combined.requirements.some(r => r.id === body.id)) throw new TraceError('需求 ID 已存在', 409);
     const owner = isCombined && body.action !== 'create' ? combined.requirements.find(r => r.id === body.id)?.sourceFeatureId : undefined;
     const feature = featureConfig(owner ?? body.featureId);
@@ -432,6 +448,7 @@ export function updateGraph(body, root = projectRoot) {
   return serialized(async () => {
     if (!body || !body.featureId || !body.expectedGraph || !body.graph) throw new TraceError('缺少功能图或基线');
     const feature = featureConfig(body.featureId);
+    if(feature.publishedTests)throw new TraceError('请在独立项目中修改需求或节点规格',403);
     const data = await loadRequirements(root, feature);
     if (body.featureId !== data.featureId) throw new TraceError('功能图不匹配');
     const source = await loadGraph(root, data.featureId, feature);

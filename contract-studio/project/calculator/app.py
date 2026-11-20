@@ -4,11 +4,8 @@ from tkinter import ttk
 from calculator import CalculationError, calculate, display
 
 
-MODES = {"两数四则": "basic", "混合四则": "expression", "多数字求和": "sum", "平均值": "average"}
-EXAMPLES = {
-    "basic": "6 ÷ 2", "expression": "12 + 3 × (8 - 4) ÷ 2",
-    "sum": ", ".join(map(str, range(1, 21))), "average": ", ".join(map(str, range(1, 21))),
-}
+LIST_EXAMPLE = " ".join(map(str, range(1, 21)))
+INPUT_HINT = "数字列表用空格分隔（如 1 2 3）；算式按 Enter"
 
 
 class CalculatorWindow(ttk.Frame):
@@ -26,16 +23,19 @@ class CalculatorWindow(ttk.Frame):
         style.configure("Error.Shell.TLabel", foreground="#b42318")
         style.configure("Calc.TButton", background="#ffffff", foreground="#17263a", bordercolor="#dce3ec", font=("Segoe UI", 14), padding=6)
         style.configure("Accent.Calc.TButton", background="#1762a2", foreground="#ffffff")
+        style.configure("List.Calc.TButton", font=("Microsoft YaHei UI", 10))
         style.map("Accent.Calc.TButton", background=[("active", "#124d81")])
         self.pack(fill="both", expand=True)
-        self.mode = tk.StringVar(value="混合四则")
         self.entry_value = tk.StringVar()
         self.result = tk.StringVar(value="0")
-        self.info = tk.StringVar(value="输入算式，按 Enter 计算")
+        self.info = tk.StringVar(value=INPUT_HINT)
         header = ttk.Frame(self, style="Shell.TFrame")
         header.pack(fill="x")
         ttk.Label(header, text="计算器", style="Title.Shell.TLabel").pack(side="left")
-        ttk.Combobox(header, values=list(MODES), textvariable=self.mode, width=10, state="readonly").pack(side="right")
+        list_actions = ttk.Frame(header, style="Shell.TFrame")
+        list_actions.pack(side="right")
+        ttk.Button(list_actions, text="求和", width=7, style="List.Calc.TButton", command=lambda: self.evaluate("sum")).pack(side="left", padx=(0, 6))
+        ttk.Button(list_actions, text="平均值", width=7, style="List.Calc.TButton", command=lambda: self.evaluate("average")).pack(side="left")
         self.entry = ttk.Entry(self, textvariable=self.entry_value, font=("Segoe UI", 15), justify="right")
         self.entry.pack(fill="x", pady=(14, 2), ipady=5)
         ttk.Label(self, textvariable=self.result, style="Result.Shell.TLabel", anchor="e").pack(fill="x")
@@ -45,7 +45,7 @@ class CalculatorWindow(ttk.Frame):
         keys.pack(fill="x")
         for col in range(4):
             keys.columnconfigure(col, weight=1, uniform="keys")
-        for row, labels in enumerate([("(", ")", "C", "⌫"), ("7", "8", "9", "÷"), ("4", "5", "6", "×"), ("1", "2", "3", "−"), ("0", ".", ",", "+")]):
+        for row, labels in enumerate([("(", ")", "C", "⌫"), ("7", "8", "9", "÷"), ("4", "5", "6", "×"), ("1", "2", "3", "−"), ("0", ".", "空格", "+")]):
             for col, text in enumerate(labels):
                 ttk.Button(keys, text=text, style="Calc.TButton", command=lambda value=text: self.press(value)).grid(row=row, column=col, sticky="ew", padx=2, pady=2)
         ttk.Button(keys, text="载入示例", style="Calc.TButton", command=self.load_example).grid(row=5, column=0, columnspan=2, sticky="ew", padx=2, pady=2)
@@ -63,7 +63,7 @@ class CalculatorWindow(ttk.Frame):
         self.entry.focus_set()
 
     def load_example(self):
-        self.entry_value.set(EXAMPLES[MODES[self.mode.get()]])
+        self.entry_value.set(LIST_EXAMPLE)
         self.entry.icursor("end")
         self.entry.focus_set()
 
@@ -71,7 +71,7 @@ class CalculatorWindow(ttk.Frame):
         if key == "C":
             self.entry_value.set("")
             self.result.set("0")
-            self.info.set("输入算式，按 Enter 计算")
+            self.info.set(INPUT_HINT)
             self.feedback.config(style="Shell.TLabel")
             self.steps.delete(0, "end")
         elif key == "⌫":
@@ -82,14 +82,15 @@ class CalculatorWindow(ttk.Frame):
         else:
             if self.entry.selection_present():
                 self.entry.delete("sel.first", "sel.last")
-            self.entry.insert("insert", key)
+            self.entry.insert("insert", " " if key == "空格" else key)
         self.entry.focus_set()
 
     # @need-ids: SPEC_PYCALC_UI
-    def evaluate(self):
+    def evaluate(self, operation: str = "expression"):
+        self.entry.focus_set()
         self.steps.delete(0, "end")
         try:
-            outcome = calculate(self.entry_value.get(), MODES[self.mode.get()])
+            outcome = calculate(self.entry_value.get(), operation)
         except CalculationError as error:
             self.result.set("错误")
             self.info.set(str(error))

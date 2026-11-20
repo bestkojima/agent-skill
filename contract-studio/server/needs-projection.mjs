@@ -25,7 +25,7 @@ export function projectNeedsGraph(graph,needs,feature,rules=defaults,entities=[]
     const code=entities.filter(entity=>entity.symbol&&entitySpecIds(entity,needs).includes(need.id)&&!entity.path.startsWith('tests/')).map(entity=>`${entity.path}#${entity.symbol}`);
     const requirements=need[rules.links.requirements]??[];
     const tests=[...requirements.flatMap(id=>(refs.get(id)??[]).filter(ref=>ref.path.startsWith('tests/')).map(ref=>ref.path)),
-      ...cases.filter(test=>test.verifies.some(link=>requirements.includes(link.requirementId))).flatMap(test=>test.files)];
+      ...cases.filter(test=>test.specIds.includes(need.id)||test.verifies.some(link=>requirements.includes(link.requirementId))).flatMap(test=>test.files)];
     return {...properties,id,title:need.title,needId:need.id,parentId:parent?specNodeId(parent,rules):before?.parentId??null,
       ...(code.length?{code:[...new Set(code)].join(', ')}:{}),...(tests.length?{test:[...new Set(tests)].join(', ')}:{}),
       position:layout.position??{x:(index%3)*340,y:Math.floor(index/3)*180},...(layout.size?{size:layout.size}:{})};

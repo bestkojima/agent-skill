@@ -72,6 +72,23 @@ test('capability display bindings are derived from spec properties and source ma
   assert.equal(bindings.testCases[0].id,'TEST_NEW');
 });
 
+test('a test can verify a node directly and remain only related to a sibling sharing its requirement',()=>{
+  const graph={nodes:[{id:'left',needId:'SPEC_LEFT'},{id:'right',needId:'SPEC_RIGHT'}],edges:[]};
+  const requirements=[{id:'REQ_SHARED',acceptance:[{id:'AC'}]}];
+  const needs={
+    SPEC_LEFT:spec('SPEC_LEFT','left',['REQ_SHARED']),
+    SPEC_RIGHT:spec('SPEC_RIGHT','right',['REQ_SHARED']),
+    REQ_SHARED:{id:'REQ_SHARED',type:'req',parts:{AC:{}}},
+    TEST_LEFT:{id:'TEST_LEFT',type:'test',verifies:['REQ_SHARED.AC','SPEC_LEFT']},
+    TEST_RIGHT:{id:'TEST_RIGHT',type:'test',verifies:['SPEC_RIGHT']}
+  };
+  const model=backendRelations(graph,requirements,{needs,registry:emptyRegistry()});
+  const scope=id=>nodeBackend(model,id).testCases.map(test=>[test.id,test.scope]);
+  assert.deepEqual(scope('left'),[['TEST_LEFT','direct']]);
+  assert.deepEqual(scope('right'),[['TEST_LEFT','related'],['TEST_RIGHT','direct']]);
+  assert.deepEqual(model.requirements[0].acceptance[0].testCaseIds,['TEST_LEFT']);
+});
+
 test('missing indexes do not resurrect code strings or old hand-maintained association tables',()=>{
   const graph={nodes:[{id:'one',code:'server/obsolete.mjs#wrong'}],edges:[]};
   const registry=createFeatureRegistry([{code:[{nodeId:'one',file:'server/obsolete.mjs',symbol:'wrong'}]}]);

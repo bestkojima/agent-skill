@@ -6,11 +6,13 @@ import path from 'node:path';
 import { nodeContext } from '../server/node-context.mjs';
 import { runCapabilityTests, listCapabilities } from '../server/capabilities.mjs';
 import { featureRegistry } from '../server/feature-registry.mjs';
+import { useLegacyContractFixture } from './legacy-contract-fixture.mjs';
 
 featureRegistry.capabilities.push({id:'fixture.execute',rootNodeId:'submit',nodeIds:['submit','form','validate','lookup','save','view'],runPath:'/api/fixture',testPath:'/api/fixture/test',frontend:{entry:'fixture',feature:'fixture',component:'FixturePanel',path:'features/fixture/client.tsx',mode:'fixture'},testFiles:['tests/fixture.test.mjs']});
 
 const node = (id,parentId=null,extra={}) => ({id,parentId,title:`标题 ${id}`,kind:'logic',description:`职责 ${id}`,input:`输入 ${id}`,output:`输出 ${id}`,processing:`处理 ${id}`,acceptance:`验收 ${id}`,errors:['无效输入'],position:{x:0,y:0},...extra});
 async function fixture(t) {
+  useLegacyContractFixture(t);
   const root = await fs.mkdtemp(path.join(os.tmpdir(),'studio-node-context-'));
   t.after(async()=>{
     assert.equal(path.dirname(root),path.resolve(os.tmpdir()));

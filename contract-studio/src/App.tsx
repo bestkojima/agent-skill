@@ -14,9 +14,9 @@ import { resolveFeature, visibleFeatures, capabilityDestination } from './featur
 import { NodeProperties } from './NodeProperties';
 import { CapabilityPanel, type Capability } from './CapabilityPanel';
 import { PublishedTests } from './PublishedTests';
+import { TraceReference, useSourceEditor, type TraceRef } from './TraceReference';
 import { importanceLabels, importanceLabel, nodeImportance } from './node-importance.mjs';
 
-type TraceRef={path:string;line:number;source?:'sphinx-codelinks'|'local-marker'};
 type Acceptance={id:string;input:string;expected:string;observable?:string};
 type Requirement={id:string;nodeId:string;nodeIds?:string[];title:string;description:string;status:'draft'|'confirmed';revision:number;code:TraceRef[];tests:TraceRef[];acceptance?:Acceptance[];acceptanceStatus?:'draft'|'confirmed'};
 type RequirementDraft={title:string;description:string;acceptance?:Acceptance[]};
@@ -105,50 +105,6 @@ function CreateRequirement({node,onCreate}:{node:Spec;onCreate:(nodeId:string,id
   </div>;
 }
 
-type SourcePreview={path:string;startLine:number;excerpt:string};
-type SourceEditor='vscode'|'notepad';
-type OpenSourceResult={opened:boolean;editor:SourceEditor;lineJumped:boolean;message:string};
-const sourceEditorKey='contract-studio-source-editor-v1';
-
-function TraceReference({reference,editor,onEditorChange}:{reference:TraceRef;editor:SourceEditor;onEditorChange:(editor:SourceEditor)=>void}){
-  const [expanded,setExpanded]=useState(false);
-  const [preview,setPreview]=useState<SourcePreview|null>(null);
-  const [loading,setLoading]=useState(false);
-  const [previewError,setPreviewError]=useState('');
-  const [opening,setOpening]=useState(false);
-  const [openMessage,setOpenMessage]=useState('');
-  const [openError,setOpenError]=useState('');
-  const loadPreview=async()=>{
-    if(loading)return;
-    setLoading(true);setPreviewError('');
-    try{setPreview(await api<SourcePreview>(`/api/traceability/source?path=${encodeURIComponent(reference.path)}&line=${reference.line}`))}
-    catch(e){setPreviewError(e instanceof Error?e.message:String(e))}
-    finally{setLoading(false)}
-  };
-  const show=()=>{if(expanded){setExpanded(false);return}setExpanded(true);if(!preview)void loadPreview()};
-  const openInEditor=async()=>{
-    setOpening(true);setOpenMessage('');setOpenError('');
-    try{const result=await api<OpenSourceResult>('/api/open-source',{path:reference.path,line:reference.line,editor});setOpenMessage(result.message)}
-    catch(e){setOpenError(e instanceof Error?e.message:String(e))}
-    finally{setOpening(false)}
-  };
-  return <div className={`trace-reference ${expanded?'is-expanded':''}`}>
-    <button type="button" className="trace-ref" aria-expanded={expanded} onClick={()=>void show()}>
-      <span>{reference.path}{reference.source==='local-marker'&&<small className="reference-origin">本地标记</small>}</span><b>第 {reference.line} 行 <span className="trace-chevron" aria-hidden="true">⌄</span></b>
-    </button>
-    <div className="trace-expand" aria-hidden={!expanded}><div className="trace-expand-inner"><div className="trace-preview-panel">
-      <div className="trace-preview-toolbar">
-        <label>打开方式<select aria-label={`选择 ${reference.path} 的编辑器`} value={editor} onChange={e=>{onEditorChange(e.target.value as SourceEditor);setOpenError('');setOpenMessage('')}}><option value="vscode">VS Code</option><option value="notepad">记事本</option></select></label>
-        <button type="button" className="trace-open" disabled={opening} onClick={()=>void openInEditor()}>{opening?'正在打开…':'在编辑器打开 ↗'}</button>
-      </div>
-      {editor==='notepad'&&<p className="trace-editor-hint">记事本打开文件后，请按 Ctrl+G 跳到第 {reference.line} 行。</p>}
-      {openError&&<div className="notice notice-error" role="alert">{openError}</div>}
-      {openMessage&&<div className="trace-open-message" role="status">{openMessage}</div>}
-      {loading?<div className="trace-preview-status" role="status">正在读取代码…</div>:previewError?<div className="notice notice-error" role="alert">无法读取代码：{previewError} <button className="link-button" onClick={()=>void loadPreview()}>重试</button></div>:preview&&<div className="trace-code" aria-label={`${preview.path} 代码预览`}><div className="trace-code-caption">代码预览 · 从第 {preview.startLine} 行</div><pre className="trace-code-lines">{preview.excerpt.split('\n').map((line,i)=>{const number=preview.startLine+i;return <span className={`trace-code-line ${number===reference.line?'is-target':''}`} key={number}><span className="trace-line-number" aria-hidden="true">{number}</span><span>{line||' '}</span></span>})}</pre></div>}
-    </div></div></div>
-  </div>;
-}
-
 function RequirementPanel({node,compatible,requirement,draft,traceability,loading,error,readOnly,onRefresh,onSave,onCreate,onDraftChange,onDiscard}:{
   node:Spec;compatible:boolean;requirement?:Requirement;traceability:Traceability|null;loading:boolean;error:string;
   readOnly?:boolean;
@@ -158,8 +114,7 @@ function RequirementPanel({node,compatible,requirement,draft,traceability,loadin
 }){
   const [busy,setBusy]=useState(false);
   const [formError,setFormError]=useState('');
-  const [editor,setEditor]=useState<SourceEditor>(()=>{try{return localStorage.getItem(sourceEditorKey)==='notepad'?'notepad':'vscode'}catch{return 'vscode'}});
-  const changeEditor=(next:SourceEditor)=>{setEditor(next);try{localStorage.setItem(sourceEditorKey,next)}catch{/* The current selection still works in this view. */}};
+  const [editor,changeEditor]=useSourceEditor();
   if(loading)return <div className="empty">正在读取需求与代码关联…</div>;
   if(error)return <div className="trace-unavailable"><div className="notice notice-error">无法读取需求关联：{error}</div><button className="link-button" onClick={onRefresh}>重新读取</button></div>;
   if(!traceability)return <div className="empty">尚未读取需求关联。</div>;
@@ -501,7 +456,7 @@ function Studio({feature,catalog,client,onFeatureChange,openRequest}:{feature:Fe
               </div>}
               <RequirementPanel key={`${selected.id}:${creatingRequirement?'new':selectedRequirement?.id??'new'}:${selectedRequirement?.revision??0}`} node={selected} compatible={compatible} readOnly={readOnly} requirement={creatingRequirement?undefined:selectedRequirement} draft={!creatingRequirement&&selectedRequirement?requirementDrafts[selectedRequirement.id]:undefined} traceability={traceability} loading={traceLoading} error={traceError} onRefresh={refreshTraceability} onSave={saveRequirement} onCreate={async(...args)=>{await createRequirement(...args);setActiveRequirementId(args[1]);setCreatingRequirement(false)}} onDraftChange={changeDraft} onDiscard={discardDraft}/>
             </>}
-            {tab==='test'&&readOnly&&<PublishedTests featureId={feature.id} nodeId={selected.id}/>}
+            {tab==='test'&&readOnly&&<PublishedTests key={selected.id} featureId={feature.id} nodeId={selected.id}/>}
              {tab==='test'&&!readOnly&&<div className="inspector-body">
               <CapabilityPanel key={selectedCapability?.id??selected.id} capability={selectedCapability} onOpen={openCapability}/>
               <div className="property-section-title">节点试运行</div>

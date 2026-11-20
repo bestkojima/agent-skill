@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { importanceLabels, importanceLabel, nodeImportance } from '../src/node-importance.mjs';
 import { traceability, updateGraph } from '../server/traceability.mjs';
+import { useLegacyContractFixture } from './legacy-contract-fixture.mjs';
 
 test('重要性仅接受三个等级，旧节点缺省普通，显式非法值拒绝', () => {
   assert.deepEqual(Object.keys(importanceLabels), ['core', 'key', 'normal']);
@@ -15,6 +16,7 @@ test('重要性仅接受三个等级，旧节点缺省普通，显式非法值�
 });
 
 test('等级保存读取与 JSON 往返一致；需求确认和执行绑定不变；非法值不落盘', async t => {
+  useLegacyContractFixture(t);
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'studio-importance-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   for (const dir of ['project/calculator', 'contracts', 'src', 'server', 'tests']) await fs.mkdir(path.join(root,dir),{recursive:true});

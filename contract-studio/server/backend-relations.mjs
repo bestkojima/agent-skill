@@ -39,7 +39,8 @@ export function indexedCapabilityBindings(cap,needs,entities) {
   const implementation=indexedFunctions(entities,needs,specIds);
   const requirementIds=unique(specs.flatMap(need=>need.fulfills??[]));
   const testCases=indexedTestCases(needs,entities).filter(test=>
-    test.files.some(file=>(cap.testFiles??[]).includes(file)) || test.verifies.some(link=>requirementIds.includes(link.requirementId)));
+    test.files.some(file=>(cap.testFiles??[]).includes(file)) ||
+    test.specIds.some(id=>specIds.has(id)) || test.verifies.some(link=>requirementIds.includes(link.requirementId)));
   return {implementation,requirementIds,testCases,nodeIds:unique([...(cap.nodeIds??[]),...specs.map(need=>need.node_id||need.id)])};
 }
 
@@ -65,12 +66,14 @@ export function backendRelations(graph,requirements,{feature={},needs={},entitie
     if(callee&&!calls.some(call=>call.caller===caller&&call.callee===callee))calls.push({caller,callee,source:'needs-declaration'});
   }
   const requirementIds=new Set(requirements.map(requirement=>requirement.id));
-  const testCases=indexedTestCases(needs,entities).filter(test=>test.verifies.some(link=>requirementIds.has(link.requirementId))).map(test=>{
-    const relatedNodes=nodes.filter(node=>test.verifies.some(link=>node.requirementIds.includes(link.requirementId)));
+  const specIds=new Set(nodes.map(node=>node.specId));
+  const testCases=indexedTestCases(needs,entities).filter(test=>
+    test.specIds.some(id=>specIds.has(id)) || test.verifies.some(link=>requirementIds.has(link.requirementId))).map(test=>{
+    const relatedNodes=nodes.filter(node=>test.specIds.includes(node.specId)||test.verifies.some(link=>node.requirementIds.includes(link.requirementId)));
     const capabilityIds=unique(relatedNodes.map(node=>node.capabilityId).filter(Boolean));
     return {...test,capabilityId:capabilityIds.length===1?capabilityIds[0]:null,capabilityIds,
-      relatedFunctionIds:functions.filter(fn=>test.verifies.some(link=>fn.requirementIds.includes(link.requirementId))).map(fn=>fn.id),
-      relationSource:'requirement-binding'};
+      relatedFunctionIds:functions.filter(fn=>fn.specIds.some(id=>test.specIds.includes(id))||test.verifies.some(link=>fn.requirementIds.includes(link.requirementId))).map(fn=>fn.id),
+      relationSource:test.specIds.length?'specification-binding':'requirement-binding'};
   });
   return {nodes,functions,calls,
     flows:graph.edges.map(edge=>({...edge,sourceKind:'contract-data-flow'})),testCases,
@@ -86,6 +89,7 @@ export function nodeBackend(relations,nodeId,evidence) {
   const requirements=new Set(node?.requirementIds??[]);
   const capabilityNodes=relations.nodes.filter(item=>node?.capabilityId&&item.capabilityId===node.capabilityId);
   const relatedIds=new Set(capabilityNodes.flatMap(item=>item.functionIds));
+  const observed=new Map((evidence?.cases??[]).map(result=>[result.id,result]));
   return {...node,
     functions:relations.functions.filter(fn=>ids.has(fn.id)),
     relatedFunctions:relations.functions.filter(fn=>relatedIds.has(fn.id)&&!ids.has(fn.id)),
@@ -94,8 +98,11 @@ export function nodeBackend(relations,nodeId,evidence) {
       return {...call,callerRef:ref(call.caller),calleeRef:ref(call.callee)};
     }),
     flows:relations.flows.filter(flow=>flow.source===nodeId||flow.target===nodeId),
-    testCases:relations.testCases.filter(test=>test.verifies.some(link=>requirements.has(link.requirementId))).map(test=>({
-      ...test,state:'not-run',...(evidence?.cases??[]).find(result=>result.id===test.id),
-      verifies:test.verifies,relatedFunctionIds:test.relatedFunctionIds,relationSource:test.relationSource
-    }))};
+    testCases:relations.testCases.flatMap(test=>{
+      const direct=test.specIds.includes(node?.specId);
+      if(!direct&&!test.verifies.some(link=>requirements.has(link.requirementId)))return [];
+      const result=observed.get(test.id);
+      return [{...test,state:'not-run',...result,verifies:test.verifies,specIds:test.specIds,relatedFunctionIds:test.relatedFunctionIds,
+        scope:direct?'direct':'related',relationSource:direct?'specification-binding':'requirement-binding'}];
+    })};
 }

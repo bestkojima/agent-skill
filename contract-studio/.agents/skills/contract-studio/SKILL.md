@@ -13,11 +13,11 @@ Use the [framework entry points](../../../README.md#agent-的框架入口) to di
 
 1. **Read context.** Query the target node (or parent for a new node): contract, importance, requirements, dependencies, direct implementation, gaps and evidence. Use `context.backend` for function scopes and acceptance-linked cases; keep related functions separate. Reconcile snapshots with saved state and draft previews. For a read-only request, report findings here.
 2. **Save the contract.** Save responsibility, importance (`core` / `key` / `normal`), inputs, outputs, rules, errors and acceptance criteria to the owning JSON or authored RST source. Use spec fields and native links under `traceability/node-mapping.json`; the framework projects them into nodes and properties. Keep stable IDs and actual confirmation scope. Save the selected contract and task context before implementation.
-3. **Implement inside the project.** Keep the Module Interface small. Mark the exact spec ID with `@need-ids:`, and declare key acceptance cases with `@need test`, a stable ID and `:verifies: REQ.AC`. Match reports by test ID. Prefer a project-owned test runner and a read-only view; embedded execution routes and components are opt-in legacy integrations.
+3. **Implement inside the project.** Mark functions with exact spec IDs using `@need-ids:`. Declare tests with `@need test`, a stable ID and `:verifies: REQ.AC, SPEC_ID`. Use the spec ID only when the test directly checks that node. Match project-owned reports by test ID.
 4. **Refresh and report.** Run `node scripts/build-index.mjs`, then read the projected node, function scopes and acceptance-linked cases. Verify affected behaviour through the Module's public Interface within authorization using actual execution evidence. Distinguish internal inputs from trial inputs, data flow from calls, and requirement links from execution coverage; report gaps and the usable entry.
 
 ## Framework invariants
 
-- Edit each item's owning source: existing JSON contracts or authored Needs RST. Generated RST, node documents and indexes are derived; layout is separate from behaviour. Browser drafts become project state only when saved.
+- Edit each item's owning source. For a native RST project, keep behaviour in the authored RST and layout in the graph; skip the legacy JSON-to-RST exporter. Browser drafts become project state only when saved.
 - A node with indexed source can be implemented without a registered execution route. Keep missing, unmatched and stale evidence distinct from passing results.
 - Requirement confirmation, source/index freshness and observed test results are separate states. Report the framework's actual state, including failed builds, stale evidence and unconnected tools.

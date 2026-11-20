@@ -4,7 +4,7 @@ import type { Capability } from './CapabilityPanel';
 
 export type FeatureDefinition = {
   id:string;alias:string;title:string;rootNodeId:string;defaultSelected:string;
-  graphFile:string;requirementFile:string;rstFile:string;graph:Graph;
+  graphFile:string;requirementFile?:string;rstFile?:string;requirementsSource?:string;graph:Graph;
   frontend:{entry:string;mode:string;component:string;path:string};
   publishedTests?:{path:string;directory:string};
   draftKeys:{graph:string;base:string;pending:string;requirements:string};

@@ -14,11 +14,16 @@ export function indexedTestCases(needs,entities) {
     // without becoming another executable source location.
     const sources=declarations.length?declarations:entities.filter(entity=>entity.needIds.includes(need.id));
     const files=[...new Set(sources.map(source=>source.path))].sort();
-    const sourceState=files.length===1?'resolved':files.length?'ambiguous':'missing';
+    const markers=declarations.flatMap(entity=>entity.declarations
+      .filter(item=>item.needId===need.id).map(item=>({path:entity.path,line:item.line,symbol:entity.symbol,source:entity.source})));
+    const sourceState=markers.length>1||files.length>1?'ambiguous':files.length===1?'resolved':'missing';
+    const reference=markers.length===1&&markers[0].symbol?markers[0]:null;
     const states=[...new Set(sources.map(source=>source.indexState))];
     const indexState=states.length===1?states[0]:states.length?'mixed':'missing';
-    return {id:need.id,name:need.title,file:files.length===1?files[0]:null,files,sourceState,indexState,
-      verifies:(need.verifies??[]).map(needId=>{
+    const targets=need.verifies??[];
+    const specIds=targets.filter(id=>needs[id]?.type==='spec');
+    return {id:need.id,name:need.title,file:files.length===1?files[0]:null,files,sourceState,indexState,specIds,reference,
+      verifies:targets.filter(id=>!specIds.includes(id)).map(needId=>{
         const separator=needId.lastIndexOf('.');
         const requirementId=Object.hasOwn(needs,needId)?needId:separator<0?needId:needId.slice(0,separator);
         const part=requirementId===needId?null:needId.slice(separator+1);

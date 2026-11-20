@@ -5,8 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { traceability, exportNeeds, updateRequirement, updateGraph, sourceAt, isLocalRequest, isLocalWrite } from '../server/traceability.mjs';
 import { api } from '../server/api.mjs';
+import { useLegacyContractFixture } from './legacy-contract-fixture.mjs';
 
 async function fixture(t) {
+  useLegacyContractFixture(t);
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'contract-studio-trace-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   for (const dir of ['project/calculator', 'contracts', 'src', 'server', 'tests']) await fs.mkdir(path.join(root,dir),{recursive:true});

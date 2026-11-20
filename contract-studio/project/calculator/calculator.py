@@ -119,16 +119,14 @@ def _expression(text: str, *, basic: bool = False) -> Result:
 
 # @need-ids: SPEC_PYCALC_LIST
 def _parse_list(text: str, minimum: int) -> list[Decimal]:
-    text = text.strip()
+    text = text.replace("−", "-").strip()
     if not text:
         raise CalculationError("请输入数字")
-    text = re.sub(r"(?<=[0-9.])\s*\+(?=\s*[+-]?(?:[0-9]|\.[0-9]))", ",", text)
-    chunks = re.split(r"[,，]", text)
-    if any(not chunk.strip() for chunk in chunks):
-        raise CalculationError("数字列表中有空项")
-    words = [word for chunk in chunks for word in chunk.split()]
+    if "," in text or "，" in text:
+        raise CalculationError("请用空格分隔数字，例如 1 2 3")
+    text = re.sub(r"(?<=[0-9.])\s*\+(?=\s*[+-]?(?:[0-9]|\.[0-9]))", " ", text)
     values = []
-    for index, word in enumerate(words, 1):
+    for index, word in enumerate(text.split(), 1):
         if not re.fullmatch(rf"[+-]?{_NUMBER}", word):
             raise CalculationError(f"第 {index} 项不是有效数字")
         values.append(_bounded(Decimal(word)))

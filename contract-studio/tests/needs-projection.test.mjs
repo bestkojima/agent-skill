@@ -11,6 +11,7 @@ import { featureRegistry, featureSource } from '../server/feature-registry.mjs';
 import { readProjectedGraph } from '../server/needs-projection.mjs';
 import { indexedCapabilities } from '../server/capabilities.mjs';
 import { nodeContext } from '../server/node-context.mjs';
+import { useLegacyContractFixture } from './legacy-contract-fixture.mjs';
 
 const project=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const python=path.join(project,process.platform==='win32'?'.venv/Scripts/python.exe':'.venv/bin/python');
@@ -31,6 +32,7 @@ test('独立图读取保留传入描述符的文件与 ID，无需登记、需�
 });
 
 async function fixture(t) {
+  useLegacyContractFixture(t);
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'studio-projection-'));
   t.after(()=>fs.rm(root,{recursive:true,force:true}));
   for(const dir of ['project/calculator', 'contracts','project/calculator','src','features','server','tests','traceability',...['cpp','python','go','rust','csharp'].map(name=>`server/adapters/impl/${name}`)])await fs.mkdir(path.join(root,dir),{recursive:true});
@@ -62,9 +64,10 @@ async function fixture(t) {
     "import test from 'node:test';",'// @need test: 库存预留验收','// :id: TEST_STOCK_RESERVE',
     '// :verifies: REQ_STOCK_RESERVE.AC_RESERVE','// @endneed',"test('[TEST_STOCK_RESERVE] remaining stock', () => {});",'',
   ].join('\n'));
+  const registry=structuredClone(featureRegistry.features);
   const result=await buildTraceabilityIndex(root,undefined,{python});
   assert.equal(result.index.state,'current',result.index.error);
-  return {root,result};
+  return {root,result,registry};
 }
 
 async function saveGraph(root,view,edit) {
@@ -75,8 +78,7 @@ async function saveGraph(root,view,edit) {
 }
 
 test('陌生领域的需求、节点属性、函数和原生测试由规则投影，无需业务映射表',integration,async t=>{
-  const registry=JSON.stringify(featureRegistry.features);
-  const {root,result}=await fixture(t);
+  const {root,result,registry}=await fixture(t);
   const node=result.projectGraph.nodes.find(node=>node.id==='SPEC_STOCK_CHECK');
   assert.equal(node.title,'校验并预留库存');
   assert.equal(node.importance,'key');
@@ -98,7 +100,7 @@ test('陌生领域的需求、节点属性、函数和原生测试由规则投�
   assert.deepEqual(result.backend.requirements.find(item=>item.id===requirement.id).acceptance[0].testCaseIds,['TEST_STOCK_RESERVE']);
   assert.deepEqual((await readJson(root,'project/calculator/graph.json')).nodes.map(node=>node.id),['one','two']);
   assert.equal((await readJson(root,'project/calculator/requirements.json')).requirements.some(item=>item.id==='REQ_STOCK_RESERVE'),false);
-  assert.equal(JSON.stringify(featureRegistry.features),registry);
+  assert.deepEqual(featureRegistry.features,registry);
   const source=await featureSource('SPEC_STOCK_CHECK',new URL('http://localhost/'),root);
   assert.equal(source.symbol,'reserveStock');assert.equal(source.startLine,2);
 });

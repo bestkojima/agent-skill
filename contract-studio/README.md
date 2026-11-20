@@ -1,6 +1,6 @@
 # Contract Studio · 独立计算器示例
 
-Windows 计算器自己运行、自己测试。工作台只展示它的功能节点、需求、代码位置和已有测试报告。
+Windows 计算器独立运行。工作台展示功能节点、需求和源码，并可在本机通过项目执行器运行选中节点的直接用例。
 
 ```text
 contract-studio/
@@ -8,7 +8,7 @@ contract-studio/
 │  ├─ app.py               桌面窗口
 │  ├─ calculator.py        运算规则和步骤
 │  ├─ requirements.rst     需求、规格和验收条件
-│  ├─ graph.json           节点布局；requirements.json 是空的兼容输入
+│  ├─ graph.json           节点布局；需求和规格只维护 RST
 │  ├─ tests/               计算器的验收测试
 │  └─ run_tests.py         运行测试并发布报告
 ├─ src/                    工作台的 React / React Flow 界面
@@ -27,7 +27,7 @@ uv run --no-project --python 3.12 python project/calculator/app.py
 uv run --no-project --python 3.12 python project/calculator/run_tests.py
 ```
 
-在计算器里选「平均值」→「载入示例」→「=」，结果为 **10.5**，总和 **210**，过程 **21 步**。测试报告写到 `project/calculator/_build/test-results.json`。更多操作见[计算器说明](project/calculator/README.md)。
+在计算器里用空格分隔数字，例如 `1 2 3`。也可以点「载入示例」填入 1 至 20，再点「求和」得 **210**（20 步），或点「平均值」得 **10.5**（21 步）。四则算式直接点「=」或按 Enter。测试报告写到 `project/calculator/_build/test-results.json`。更多操作见[计算器说明](project/calculator/README.md)。
 
 ## 启动工作台
 
@@ -40,7 +40,9 @@ node scripts/build-index.mjs
 npm run dev -- --host 127.0.0.1
 ```
 
-打开终端显示的本地地址，或加 `/?example=suite`。点「计算平均值」→「需求关联」可展开函数和测试源码，也能跳转 VS Code；切到「测试报告」可以读项目上次发布的结果。没有报告会显示未运行；未匹配或过期的结果不会显示通过。工作台没有计算器页面，也不会替它运行测试。
+打开终端显示的本地地址，或加 `/?example=suite`。点「计算平均值」→「测试报告」→「运行本节点测试」。工作台从索引筛选直接关联的用例，交给计算器项目的执行器；本次结果下可展开测试源码，也能跳转 VS Code。仅共享需求的用例不参与这次运行。
+
+节点测试只在本机触发，结果与上次全量报告分开，不用于替代 PR 的全量回归。源码无法唯一定位或索引过期时，侧栏会说明为什么不能运行。
 
 ## Agent 的框架入口
 
@@ -53,7 +55,7 @@ npm run dev -- --host 127.0.0.1
 
 ## Sphinx-Needs 与 CodeLinks 用法
 
-用 `req` 声明需求、`need_part` 给验收项编号。用 `spec.fulfills` 把规格连到需求；在函数前加 `@need-ids: 规格ID`，CodeLinks 会定位具体函数。测试用 `@need test` 声明 ID，再以 `verifies: 需求ID.验收项ID` 精确关联。项目报告中的同一个测试 ID 用来回填运行结果。
+用 `req` 声明需求、`need_part` 给验收项编号。用 `spec.fulfills` 把规格连到需求；在函数前加 `@need-ids: 规格ID`，CodeLinks 会定位具体函数。测试用 `@need test` 声明 ID，再用 `:verifies: 需求ID.验收项ID, 规格ID` 同时声明验收项和它直接验证的节点。项目报告中的同一个测试 ID 用来回填运行结果。
 
 例：`REQ_PYCALC_AVERAGE.TWENTY` 对应 `TEST_PYCALC_AVG20`。规格 `SPEC_PYCALC_AVERAGE` 的实现是 `_average`。无需另写关系表。Sphinx 生成的 `traceability/_build/needs/` 及项目测试报告都不提交；ubCode 编辑器可独立使用，工作台未直接接入它。
 

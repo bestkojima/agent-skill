@@ -7,10 +7,12 @@ import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { readNeedsIndex, buildNeedsIndex, normalizeCodeUrl, sourceRevision } from '../server/needs-index.mjs';
 import { traceability, exportNeeds, updateRequirement, sourceAt, buildTraceabilityIndex } from '../server/traceability.mjs';
+import { useLegacyContractFixture } from './legacy-contract-fixture.mjs';
 
 const project=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const python=path.join(project,process.platform==='win32'?'.venv/Scripts/python.exe':'.venv/bin/python');
 async function fixture(t,{configured=false}={}) {
+  useLegacyContractFixture(t);
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'studio-index-'));
   t.after(()=>fs.rm(root,{recursive:true,force:true}));
   for(const dir of ['project/calculator', 'contracts','src','features/demo','server','tests','traceability','server/adapters/impl/java','server/adapters/impl/php','server/adapters/impl/cpp'])await fs.mkdir(path.join(root,dir),{recursive:true});

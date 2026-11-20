@@ -108,7 +108,23 @@
 .capability-map dd>b{font-weight:600}
 .test-evidence{margin:14px 0 20px;padding:13px;border:1px solid #e1ebef;border-radius:9px;background:#f9fcfd}
 .test-evidence-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:13px;color:#405f70}
-.test-evidence>.primary-button{margin-top:12px}
+.test-evidence .micro{color:#596e7d}
+.test-scope-heading{display:flex;justify-content:space-between;gap:8px;margin:13px 0 4px;font-size:12px;color:#253f50}
+.test-scope-heading span{color:#496577}
+.test-case-list{list-style:none;margin:0;padding:0}
+.test-case-list li{padding:8px 0;border-bottom:1px solid #e3ebef;font-size:12px}
+.test-case-line{display:flex;align-items:baseline;gap:8px}
+.test-case-list strong{flex:none;color:#496577}
+.test-case-list strong[data-state=passed]{color:#226850}
+.test-case-list strong[data-state=failed]{color:#9c3a32}
+.test-case-list code{display:block;color:#496577;margin-top:3px;overflow-wrap:anywhere}
+.test-case-list p{margin:5px 0 0;overflow-wrap:anywhere;color:#873b34}
+.related-test-cases{margin-top:12px;font-size:12px;color:#405f70}
+.related-test-cases summary{cursor:pointer;font-weight:650;padding:5px 0}
+.related-test-cases summary span{margin-left:4px;font-weight:400}
+.node-test-actions{margin:9px 0 13px}
+.node-test-run{margin:14px 0}
+.test-report-caption{margin-top:15px;color:#405f70;font-size:12px;font-weight:700}
 .evidence-status{font-size:11px;padding:4px 6px;border-radius:5px;color:#80949f;background:#edf2f5}
 .evidence-status.passed{background:#e5f5ec;color:#24745b}
 .evidence-status.failed{background:#fff0e9;color:#aa5138}
