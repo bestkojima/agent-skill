@@ -4,9 +4,9 @@
 
 ## 当前分支：calcutor-example
 
-此分支保留完整计算器工作台、业务源码与演示测试。可复用的 Skill 和不含业务示例的通用框架模板维护在 **[main 分支](https://gitee.com/ddddr_wew/agent-skill/tree/main/contract-studio/)**；安装技能请使用 main 的整个 `contract-studio/` 文件夹。
+此分支提供独立的 Python Windows 计算器，以及只读展示它的需求图、源码定位和测试报告的工作台。可复用的 Skill 和通用框架模板维护在 **[main 分支](https://github.com/bestkojima/agent-skill/tree/main/contract-studio)**。
 
-运行计算器：进入 `contract-studio/`，按[工作台说明](contract-studio/README.md#启动工作台)安装依赖并启动，再打开 `/?example=suite`。本分支目录与原启动入口保持不变。
+计算器与测试从 [project/calculator](contract-studio/project/calculator/) 运行；[工作台](contract-studio/README.md#启动工作台) 单独启动，`/?example=suite` 打开计算器追踪图。
 
 ## 目录
 

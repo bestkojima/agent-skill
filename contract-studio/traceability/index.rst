@@ -7,10 +7,8 @@ Contract Studio 需求追踪
    :maxdepth: 1
 
    requirements
-   calculator
-   sum
-   expression
-   calculator-suite
+   python-calculator
+   python-calculator-view
    node-properties
 
 .. src-trace::
@@ -39,3 +37,6 @@ Contract Studio 需求追踪
 
 .. src-trace::
    :project: csharp
+
+.. src-trace::
+   :project: desktop_calculator

@@ -104,36 +104,6 @@ test('saved test evidence remains current for layout and importance, but never c
   assert.equal((await nodeContext({featureId:'demo',nodeId:'submit'},root)).context.evidence.state,'passed');
 });
 
-test('average draft evidence follows its own nodes and incident edges, not unrelated graph changes',async t=>{
-  const {root,graph}=await fixture(t);
-  const rename=id=>({submit:'average',validate:'avg-validate',save:'avg-compute'}[id]??id);
-  graph.nodes=graph.nodes.map(item=>({...item,id:rename(item.id),parentId:rename(item.parentId),
-    ...(item.capabilityId?{capabilityId:'average.calculate'}:{})}));
-  graph.edges=graph.edges.map(edge=>({...edge,source:rename(edge.source),target:rename(edge.target)}));
-  await fs.writeFile(path.join(root,'contracts/feedback.json'),JSON.stringify(graph));
-  for(const file of listCapabilities().find(cap=>cap.id==='average.calculate').testFiles){
-    await fs.writeFile(path.join(root,file),"import test from 'node:test';import assert from 'node:assert/strict';test('average fixture',()=>assert.equal((1+2+3)/3,2));\n");
-  }
-  assert.equal((await runCapabilityTests('average.calculate',root)).state,'passed');
-  const cases=[
-    ['unrelated node',draft=>{draft.nodes.find(item=>item.id==='unrelated').processing='unrelated change';},false],
-    ['unrelated edge',draft=>{draft.edges.find(edge=>edge.id==='unrelated').label='unrelated branch';},false],
-    ['owned node',draft=>{draft.nodes.find(item=>item.id==='avg-validate').processing='changed validation';},true],
-    ['incident edge',draft=>{draft.edges.find(edge=>edge.id==='incoming').label='changed input condition';},true],
-    ['new binding',draft=>{draft.nodes.find(item=>item.id==='unrelated').capabilityId='average.calculate';},true],
-    ['layout and importance',draft=>{const item=draft.nodes.find(item=>item.id==='average');item.position.x=50;item.importance='normal';},false]
-  ];
-  for(const [label,change,affected] of cases){
-    const draft=structuredClone(graph);change(draft);
-    const {context}=await nodeContext({featureId:'demo',nodeId:'average',graph:draft},root);
-    assert.equal(context.provenance.evidenceContractChanges,affected,label);
-    assert.equal(context.evidence.state,affected?'stale':'passed',label);
-    assert.equal(context.evidence.coversCurrentGraph,!affected,label);
-    assert.equal(context.savedEvidence.state,'passed',label);
-    assert.equal(context.provenance.semanticChanges,label!=='layout and importance',label);
-  }
-});
-
 test('unbound nodes expose actual gaps; an explicit unknown capability does not inherit a same-ID binding',async t=>{
   const {root,graph} = await fixture(t);
   const selected = graph.nodes.find(item=>item.id==='submit');

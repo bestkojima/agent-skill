@@ -121,5 +121,13 @@ get_need_id_refs = true
 [codelinks.projects.csharp.source_discover]
 src_dir = "../server/adapters/impl/csharp"
 comment_type = "csharp"
+
+[codelinks.projects.desktop_calculator.source_discover]
+src_dir = "../project/calculator"
+comment_type = "python"
+
+[codelinks.projects.desktop_calculator.analyse]
+get_need_id_refs = true
+get_multiline_needs = true
 [codelinks.projects.csharp.analyse]
 get_need_id_refs = true

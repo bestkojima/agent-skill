@@ -1,7 +1,7 @@
 project = 'Contract Studio traceability'
 extensions = ['sphinx_needs', 'sphinx_codelinks']
 master_doc = 'index'
-exclude_patterns = ['_build']
+exclude_patterns = ['_build', 'calculator.rst']
 needs_from_toml = 'ubproject.toml'
 
 # ubCode calls the C# syntax "csharp"; Sphinx-CodeLinks 2.0 calls it "cs".

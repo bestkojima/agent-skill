@@ -1,7 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import calculator from '../features/calculator/server.mjs';
 import feedback from '../features/feedback/server.mjs';
 
 const projectRoot=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
@@ -37,7 +36,17 @@ export function createFeatureRegistry(bundles) {
   };
 }
 
-export const featureRegistry=createFeatureRegistry([calculator,feedback]);
+const calculatorProject = {
+  id:'calculator.suite', alias:'suite', title:'Windows 计算器', defaultUi:true,
+  rootNodeId:'SPEC_PYCALC_RUN', defaultSelected:'SPEC_PYCALC_RUN',
+  graphFile:'project/calculator/graph.json',requirementFile:'project/calculator/requirements.json',
+  requirementsSource:'project/calculator/requirements.rst',
+  rstFile:'traceability/python-calculator-view.rst',
+  frontend:{entry:'external-calculator',mode:'desktop',component:'Tkinter',path:'project/calculator/app.py'},
+  publishedTests:{path:'project/calculator/_build/test-results.json',directory:'project/calculator/'},
+  draftKeys:{graph:'python-calculator-view',base:'python-calculator-base',pending:'python-calculator-pending',requirements:'python-calculator-reqs'},
+};
+export const featureRegistry=createFeatureRegistry([{features:[calculatorProject]},feedback]);
 
 export async function featureCatalog(root=projectRoot) {
   const {openTraceability}=await import('./traceability.mjs');

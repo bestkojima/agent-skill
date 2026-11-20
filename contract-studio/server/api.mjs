@@ -11,6 +11,12 @@ function registeredFeature(value) {
   return feature;
 }
 
+function editableFeature(value) {
+  const feature=registeredFeature(value);
+  if(feature.publishedTests)throw new TraceError('请在独立项目中修改需求或节点规格',403);
+  return feature;
+}
+
 async function jsonBody(req, limit = 40_000) {
   let text = '';
   for await (const chunk of req) {
@@ -77,12 +83,12 @@ export async function api(req, res, next) {
     }
     if (req.method === 'POST' && url.pathname === '/api/traceability/requirement') {
       if (!isLocalWrite(req)) return reply(res, 403, {error: 'Only same-origin local JSON updates are allowed'});
-      const body=await jsonBody(req);if(body.featureId)body.featureId=registeredFeature(body.featureId).id;
+      const body=await jsonBody(req);if(body.featureId)body.featureId=editableFeature(body.featureId).id;
       return reply(res, 200, await updateRequirement(body));
     }
     if (req.method === 'POST' && url.pathname === '/api/traceability/graph') {
       if (!isLocalWrite(req)) return reply(res, 403, {error: 'Only same-origin local JSON updates are allowed'});
-      const body=await jsonBody(req,1_000_000);if(body.featureId)body.featureId=registeredFeature(body.featureId).id;
+      const body=await jsonBody(req,1_000_000);if(body.featureId)body.featureId=editableFeature(body.featureId).id;
       return reply(res, 200, await updateGraph(body));
     }
     if(req.method==='GET'&&url.pathname==='/api/code') {

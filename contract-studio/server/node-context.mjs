@@ -7,6 +7,8 @@ import { describeNodeContext } from '../src/node-context.mjs';
 import { nodeImportance } from '../src/node-importance.mjs';
 import { nodeBackend } from './backend-relations.mjs';
 import { nodeProperties } from './needs-projection.mjs';
+import { featureRegistry } from './feature-registry.mjs';
+import { readProjectEvidence } from './project-evidence.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const normalizeNode = node => node ? {...node, importance:nodeImportance(node.importance)} : null;
@@ -17,7 +19,7 @@ const evidenceSummary = report => {
   return {...summary, url:`/api/capabilities/evidence?capabilityId=${encodeURIComponent(report.capabilityId)}`};
 };
 
-function gapsFor(node, requirements, capability, index, evidence, backend) {
+function gapsFor(node, requirements, capability, index, evidence, backend, published) {
   const gaps = [];
   const add = (code,message) => gaps.push({code,message});
   for (const [field,label] of [['description','职责'],['input','输入'],['output','输出'],['processing','处理规则']]) {
@@ -31,7 +33,9 @@ function gapsFor(node, requirements, capability, index, evidence, backend) {
     if (requirement.status !== 'confirmed') add(`requirement.${requirement.id}.confirmation`,`${requirement.id} 正文待用户确认`);
     if (requirement.acceptance?.length && requirement.acceptanceStatus !== 'confirmed') add(`requirement.${requirement.id}.acceptance-confirmation`,`${requirement.id} 验收条件待用户确认`);
   }
-  if (!capability) add('capability.missing',node.capabilityId?`能力 ${node.capabilityId} 尚未登记`:'实现并登记可信能力');
+  if (published) {
+    if (!backend.functions.length) add('implementation.missing','在实际函数旁引用该节点的规格 ID，并刷新索引');
+  } else if (!capability) add('capability.missing',node.capabilityId?`能力 ${node.capabilityId} 尚未登记`:'实现并登记可信能力');
   else {
     if (!backend.functions.length) add('implementation.missing','在实际函数旁引用该节点的规格 ID，并刷新索引');
     if(index.state==='current')for(const fn of backend.functions)if(fn.scopeState!=='current')add(`implementation.${fn.id}.scope`,`${fn.path}#${fn.symbol} 尚未取得唯一的 CodeLinks 函数定位`);
@@ -78,7 +82,7 @@ function formatDocument(context) {
       ...(requirement.acceptance??[]).map(item=>`- ${item.id}：输入 ${item.input}；预期 ${item.expected}${item.observable?'；观察 '+item.observable:''}`)
     ].join('\n')).join('\n\n')||'待关联'}`,
     `## 实现函数\n${context.implementation.map(ref=>`- ${ref.path}#${ref.symbol} · ${ref.startLine??'?'}–${ref.endLine??'?'} · ${ref.scopeState}`).join('\n')||'待实现'}`,
-    `## 后端连接\n${context.backend.calls.map(call=>`- 声明调用：${call.callerRef.path}#${call.callerRef.symbol} → ${call.calleeRef.path}#${call.calleeRef.symbol}`).join('\n')||'未发现 calls 声明'}\n业务出入边属于数据流；实际调用由执行器单独提供，平均值示例见 observedCalls。${context.backend.trial?'\n试运行适配器：'+context.backend.trial.description+schema(context.backend.trial.inputSchema):''}`,
+    `## 实现关系\n${context.backend.calls.map(call=>`- 声明调用：${call.callerRef.path}#${call.callerRef.symbol} → ${call.calleeRef.path}#${call.calleeRef.symbol}`).join('\n')||'未发现 calls 声明'}\n业务出入边表达数据流。${context.backend.trial?'\n试运行适配器：'+context.backend.trial.description+schema(context.backend.trial.inputSchema):''}`,
     `## 验收用例\n${context.backend.testCases.map(test=>`- ${test.id} · ${test.name} · ${test.state}\n  ${test.verifies.map(link=>link.needId+' ['+link.state+']').join(', ')}`).join('\n')||'尚未解析到 verifies 测试条目'}`,
     `## 前端入口\n${context.frontend?`${context.frontend.component} · ${context.frontend.path} · 模式 ${context.frontend.mode??'默认'}`:'前端待接入'}`,
     `## 源码定位\n${refs(context.code)||'待关联'}`,
@@ -88,7 +92,7 @@ function formatDocument(context) {
       evidence.message,
       evidence.completedAt?`记录时间：${evidence.completedAt}`:null,
       evidence.passed!==undefined?`${evidence.passed} 通过 / ${evidence.failed??0} 失败`:null,
-      `证据：${evidence.url}`
+      evidence.url?`证据：${evidence.url}`:null
     ].filter(Boolean).join('\n'):'能力尚未登记'}`,
     `## 追踪上下文\n项目：${context.feature.id}\n需求源：${context.source}\n索引：${context.index?.source??'未读取'} / ${context.index?.state??'未读取'}\nRST：${context.sphinx?.state??'未读取'}\nubCode：${context.ubcode?.message??context.ubcode?.state??'未读取'}`,
     `## 待补齐\n${context.gaps.map(gap=>`- ${gap.message}`).join('\n')||'当前契约、绑定与证据未发现待补项。'}`
@@ -116,10 +120,15 @@ export async function nodeContext({featureId,nodeId,graph:preview} = {}, root = 
   const capability = (node.capabilityId ? capabilities.find(item=>item.id===node.capabilityId) : capabilities.find(item=>item.nodeIds.includes(nodeId))) ?? null;
   const draft = !isDeepStrictEqual(graph,saved.projectGraph);
   const semanticChanges = draft && !isDeepStrictEqual(semanticGraph(graph),semanticGraph(saved.projectGraph));
+  const descriptor=featureRegistry.resolveFeature(saved.featureId);
+  const published=descriptor?.publishedTests;
   const evidenceContractChanges = Boolean(capability) && draft && !isDeepStrictEqual(
     capabilityGraphContract(graph,capability),capabilityGraphContract(saved.projectGraph,capability));
   const savedEvidence = capability ? evidenceSummary(await capabilityEvidence(capability.id,root,project)) : null;
-  const evidence = savedEvidence && evidenceContractChanges ? {...savedEvidence,
+  const evidence = published ? await readProjectEvidence(root,published.path,nodeBackend(view.backend,nodeId).testCases,{
+    stale:semanticChanges||saved.index.state!=='current',
+    sourceRevision:Object.entries(saved.index.sourceRevision??{}).filter(([file])=>file.startsWith(published.directory)),
+  }) : savedEvidence && evidenceContractChanges ? {...savedEvidence,
     state:savedEvidence.state==='not-run'?'not-run':'stale',
     cases:savedEvidence.cases?.map(test=>test.state==='not-run'?test:{...test,observedState:test.observedState??test.state,state:'stale'}),
     coversCurrentGraph:false,
@@ -129,13 +138,13 @@ export async function nodeContext({featureId,nodeId,graph:preview} = {}, root = 
   const context = {
     feature:graph.feature,node,properties:nodeProperties(node),parent:ancestors.at(-1)??null,ancestors,incoming,outgoing,children,
     internalEdges:graph.edges.filter(edge=>childIds.has(edge.source)&&childIds.has(edge.target)),
-    requirements,capability,implementation:backend.functions,relatedImplementation:backend.relatedFunctions,backend,frontend:capability?.frontend??null,
+    requirements,capability,implementation:backend.functions,relatedImplementation:backend.relatedFunctions,backend,frontend:capability?.frontend??(published?descriptor.frontend:null),
     code:uniqueRefs(requirements.flatMap(requirement=>requirement.code??[])),
     tests:uniqueRefs(requirements.flatMap(requirement=>requirement.tests??[])),
     provenance:{graph:draft?'draft':'saved',requirements:'saved',semanticChanges,evidenceContractChanges},
     source:saved.source,index:saved.index,sphinx:saved.sphinx,ubcode:saved.ubcode,
     evidence,savedEvidence,
-    gaps:gapsFor(node,requirements,capability,saved.index,evidence,backend)
+    gaps:gapsFor(node,requirements,capability,saved.index,evidence,backend,published)
   };
   const markdown = formatDocument(context);
   const taskMarkdown = [

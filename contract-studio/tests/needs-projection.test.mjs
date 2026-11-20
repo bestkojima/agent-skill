@@ -32,7 +32,7 @@ test('独立图读取保留传入描述符的文件与 ID，无需登记、需�
 async function fixture(t) {
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'studio-projection-'));
   t.after(()=>fs.rm(root,{recursive:true,force:true}));
-  for(const dir of ['contracts','src','features','server','tests','traceability',...['cpp','python','go','rust','csharp'].map(name=>`server/adapters/impl/${name}`)])await fs.mkdir(path.join(root,dir),{recursive:true});
+  for(const dir of ['contracts','project/calculator','src','features','server','tests','traceability',...['cpp','python','go','rust','csharp'].map(name=>`server/adapters/impl/${name}`)])await fs.mkdir(path.join(root,dir),{recursive:true});
   // Saves use the established project interpreter path; share it without copying dependencies.
   await fs.symlink(path.join(project,'.venv'),path.join(root,'.venv'),process.platform==='win32'?'junction':'dir');
   await fs.writeFile(path.join(root,'contracts/requirements.json'),JSON.stringify({version:1,featureId:'demo',requirements:[{id:'REQ_LEGACY',nodeId:'one',title:'既有入口',description:'保留原有功能入口。',status:'draft',revision:1}]}));
@@ -218,7 +218,7 @@ test('项目定制字段与关系在公共 Interface 同时贯通属性、函数
     '[needs.links.satisfies]', 'outgoing = "satisfies"', 'incoming = "satisfied by"', '',
   ].join('\n'));
   const document=path.join(root,'traceability/warehouse.rst');
-  await fs.writeFile(document,(await fs.readFile(document,'utf8')).replaceAll(':node_properties:',':contract_fields:').replaceAll(':fulfills:',':satisfies:').replace('"warehouse":"east-1"','"warehouse":"east-1","capabilityId":"average.calculate"'));
+  await fs.writeFile(document,(await fs.readFile(document,'utf8')).replaceAll(':node_properties:',':contract_fields:').replaceAll(':fulfills:',':satisfies:').replace('"warehouse":"east-1"','"warehouse":"east-1","capabilityId":"feedback.submit"'));
   const built=await buildTraceabilityIndex(root,undefined,{python});
   assert.equal(built.index.state,'current',built.index.error);
   const project=await openTraceability(root),view=await project.feature('demo');
@@ -226,7 +226,7 @@ test('项目定制字段与关系在公共 Interface 同时贯通属性、函数
   assert.equal(node.warehouse,'east-1');
   assert.equal(view.backend.nodes.find(node=>node.nodeId==='SPEC_STOCK_CHECK').requirementIds[0],'REQ_STOCK_RESERVE');
   assert.equal(view.backend.functions.find(fn=>fn.symbol==='reserveStock').nodeIds[0],node.id);
-  const cap=project.capabilities().find(cap=>cap.id==='average.calculate');
+  const cap=project.capabilities().find(cap=>cap.id==='feedback.submit');
   assert.ok(cap.nodeIds.includes(node.id));assert.ok(cap.requirementIds.includes('REQ_STOCK_RESERVE'));
   assert.equal(cap.implementation[0].symbol,'reserveStock');assert.equal(cap.testCases[0].id,'TEST_STOCK_RESERVE');
   const contract=project.capabilityContract(cap.id);

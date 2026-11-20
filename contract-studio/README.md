@@ -2,7 +2,7 @@
 
 框架提供功能图、节点属性、需求索引、实现绑定和测试证据；精简 Skill 指导 Agent 在这些能力中完成开发。计算器与反馈工单用于演示框架。
 
-使用时，在功能图中添加节点、写清输入输出和验收条件，把开发任务交给当前 Codex；实现完成后，回到同一工作台操作功能、查看源码和真实测试报告。
+使用时，在功能图中添加节点、写清输入输出和验收条件，把开发任务交给当前 Codex；实现完成后，从项目自己的入口操作功能，再到工作台查看图、源码和真实测试报告。
 
 [Skill 入口](.agents/skills/contract-studio/SKILL.md) · [Skill 验收](docs/skill-evaluation.md) · [节点契约与验收规格](docs/design/skill-workbench.md) · [领域术语](GLOSSARY.md) · [架构决定](docs/adr/0001-feature-graph-and-codex-workflow.md)
 
@@ -37,66 +37,36 @@ const preview = await project.feature(featureId, { graph: draftGraph });
 
 ## 启动工作台
 
-需要 Node.js 20.19 或更新版本（推荐 22.x），完整需求索引还需要 [uv](https://docs.astral.sh/uv/)。在项目目录运行：
+Windows 计算器位于 [project/calculator](project/calculator/)。应用与工作台分别启动。
 
-```bash
+```powershell
+# 在 contract-studio 目录：先体验桌面应用；需要报告时，另开终端执行第二条。
+uv run --no-project --python 3.12 python project/calculator/app.py
+uv run --no-project --python 3.12 python project/calculator/run_tests.py
+
+# 需要查看图时再启动工作台。
 npm install
 uv sync --locked --python 3.12
-node scripts/build-index.mjs calculator.suite
+node scripts/build-index.mjs
 npm run dev -- --host 127.0.0.1
 ```
 
-打开终端显示的本机地址。`pyproject.toml` 和 `uv.lock` 固定 Sphinx 构建环境；首次同步需要下载依赖。索引构建失败时查看输出或工作台中的错误，已保存的需求仍保留。
+打开终端地址的 `/?example=suite`：点「计算平均值」→「需求关联」看需求、函数和测试源码；点「测试报告」看项目最近发布的结果。旧计算器 Web 路由已停用。反馈工单仍从 `/?example=feedback` 进入，保留原演示方式。
 
-| 示例 | 入口 | 用途 |
-| --- | --- | --- |
-| 计算器 | `/?example=suite` | 两数四则、求和、混合运算和平均值共用一个工作台 |
-| 反馈工单 | `/?example=feedback` | 表单校验、查重、内存保存及多语言 Adapter |
-
-旧的 `/?example=calculator`、`/?example=sum`、`/?example=expression` 入口和各自的浏览器草稿仍保留。计算器统一图使用独立草稿；若项目已更新而浏览器还显示旧图，先导出要保留的草稿，再选择“读取项目图”。
-
-## 先试试平均值
-
-在图下方选择平均值模式，载入 20 个数的示例并计算：数量为 **20**，总和为 **210**，平均值为 **10.5**。过程区显示 20 次真实累加和最后一次除法；图中高亮相应处理步骤。
-
-平均值接受一个或多个有限数字，支持负数、小数和零。数字可用逗号、空格或加号分隔，例如 `-2, 0, 5` 得到 `1`；空项和非法数字会显示错误，不会被自动跳过。计算沿用 JavaScript 浮点数语义，部分小数存在舍入误差。
-
-同一输入与键盘还支持：
-
-- **两数四则**：例如 `12÷3`；除零显示错误。
-- **多数字求和**：至少 3 个数字，输入 `1+2+3`；20 数示例总和为 210，数量不限于 20 项。
-- **混合四则**：支持括号和优先级，例如 `12 + 3 × (8 - 4) ÷ 2 = 18`。
-
-直接输入后按 Enter 或 `=` 计算，按 Esc 清空。前端组织输入和展示过程，业务计算由后端执行。
-
-## 在图中组织功能
+## 在图中查看独立项目
 
 ```text
-输入 → 计算 → 结果
-       ├─ 两数四则运算
-       ├─ 多数字求和
-       ├─ 混合四则运算
-       │  └─ 识别数字与符号 → 处理优先级 → 逐步求值
-       └─ 平均值
-          └─ 校验数字 → 累加与计数 → 计算平均值
+contract-studio/                  工作台
+└─ project/
+   └─ calculator/                独立 Tkinter 项目
+      ├─ app.py                   窗口入口
+      ├─ calculator.py            运算与步骤
+      ├─ requirements.rst         需求、验收子项与规格
+      ├─ tests/                   验收测试
+      └─ run_tests.py              发布逐用例报告
 ```
 
-展开表示父子包含关系，连线表示业务或数据依赖。图描述规格，程序的实际执行由业务代码承担。
-
-在功能组内点“＋ 添加”，或双击计算器画布空白处创建节点。点击节点打开右侧面板：
-
-- **节点属性**：名称、类型、重要性、所属功能组、职责、输入输出、处理规则、异常和节点验收说明；可展开结构化输入输出，并选择已接入的运行能力。
-- **需求关联**：关联已有需求或创建草稿；一个节点可关联多条需求。每条需求维护带 ID 的验收条件。
-- **实现映射／运行与测试**：查看后端入口、实现函数、前端入口和关联测试，区分试运行结果与实际测试报告。
-- **文档与任务**：查看当前节点说明，导出说明或 Codex 开发任务。
-
-节点类型改为功能组后，可以继续添加子节点。新节点没有实际能力时显示“待实现”，先完成开发和登记再运行。
-
-在侧栏修改“逻辑重要性”，画布同步显示颜色与等级文字：**核心逻辑（紫色）**、**关键逻辑（琥珀色）**、**普通组成逻辑（蓝灰色）**。保存到项目后保留选择，节点说明和开发任务也携带等级。新节点及未设置等级的旧节点默认为普通组成逻辑；等级与运行成功／失败分别显示。
-
-打开“重点视图”后，核心与关键逻辑突出显示，普通节点淡化并保留连线。选中节点后使用“聚焦节点”查看它及直接关联，返回总览恢复全图阅读。这些操作只改变视图，不改节点契约或测试证据。
-
-画布编辑保存在浏览器草稿中，“保存到项目”才写入功能图。需求编辑直接保存到需求文件；新节点应先保存到项目，再关联需求。保存发现项目图已被其他操作修改时会提示冲突。JSON 导入、导出可用于交换和保留草稿。
+计算器视图只读。需求、规格和关系在项目 RST 中维护，节点位置在 `project/calculator/graph.json` 中维护。切换节点、查看源码或刷新报告均不会运行计算器。反馈工单视图继续支持图与需求编辑。
 
 ## 把节点交给 Codex 实现
 
@@ -135,9 +105,9 @@ npm run dev -- --host 127.0.0.1
 node scripts/build-index.mjs
 ```
 
-该命令同步既有 JSON 对应的 RST，再构建所有已接入的 Needs 文档与源码。指定 `calculator.suite` 时，同步统一计算器及其两数、求和、混合运算来源。产物 `traceability/_build/needs/needs.json` 保存条目与关系，旁边的 `code-entities.json` 保存 CodeLinks 函数身份、签名和范围，均不纳入 Git。
+该命令同步既有 JSON 对应的 RST，再构建所有已接入的 Needs 文档与源码。计算器的业务需求直接来自项目拥有的 RST。产物 `traceability/_build/needs/needs.json` 保存条目与关系，旁边的 `code-entities.json` 保存 CodeLinks 函数身份、签名和范围，均不纳入 Git。
 
-从画布新增的计算器需求写入 `contracts/calculator-suite.requirements.json`。原两数、求和、混合运算需求继续归属各自的需求文件，统一视图聚合读取；反馈工单继续使用 `contracts/requirements.json`。原确认记录和修订信息随源文件保留。原生 RST 条目保持在其手写文档中，编辑节点属性、需求正文、验收条件或确认状态时写回该文档。
+计算器需求在项目自身的 `requirements.rst` 维护；反馈工单继续使用 `contracts/requirements.json`。
 
 Sphinx-Needs 解析结构化条目和关系，CodeLinks 读取源码标记。当前 Java、PHP 引用使用明确标注的 `local-marker` 兼容扫描，其余受配置支持的引用标注 `sphinx-codelinks`。源码标记只能说明关联位置，实际行为要看运行与测试。
 
@@ -147,7 +117,7 @@ Agent 编写规范条目和源码标记，框架自动关联。**Sphinx-Needs** 
 
 新增原生条目时，按下面三处编写；既有 JSON 条目继续从其源修改，复用节点上下文返回的 `needId`。
 
-**1. 写需求和节点规格。** 在 `traceability/` 的手写 RST 中定义条目，并加入 `traceability/index.rst` 的 `toctree`。例如给已有计算器视图加一个“加一”节点：
+**1. 写需求和节点规格。** 在 `traceability/` 的手写 RST 中定义条目，并加入 `traceability/index.rst` 的 `toctree`。例如给另一个可编辑视图加一个“加一”节点：
 
 ```rst
 .. req:: 数字加一
@@ -159,7 +129,7 @@ Agent 编写规范条目和源码标记，框架自动关联。**Sphinx-Needs** 
 
 .. spec:: 加一
    :id: SPEC_INCREMENT
-   :feature_id: calculator.suite
+   :feature_id: feedback.submit
    :fulfills: REQ_INCREMENT
    :importance: normal
    :node_properties: {"input":"一个数字","output":"加一后的数字"}
@@ -200,7 +170,7 @@ test('[TEST_INCREMENT] 加一返回预期结果', () => {
 
 完成后执行 `node scripts/build-index.mjs`，读取节点上下文核对映射，再按授权执行测试。源码扫描目录与关系类型配置在 `traceability/ubproject.toml`；新增 CodeLinks 项目时同步 `traceability/index.rst` 的 `src-trace`。普通验收 ID 原样成为 part ID；含点或以 `PART_` 开头的既有 ID 使用可逆编码，以接口返回的 `needId` 为准。格式依据：[Sphinx-Needs 验收子条目](https://sphinx-needs.readthedocs.io/en/latest/roles.html#need-part-np)、[CodeLinks 源码分析](https://codelinks.useblocks.com/en/sphinx-codelinks-v2.1.0/components/analyse.html)。
 
-查询 `GET /api/node-context?feature=suite&nodeId=avg-compute` 可取得：
+查询 `GET /api/node-context?feature=suite&nodeId=SPEC_PYCALC_AVERAGE` 可取得：
 
 - `context.properties`：行为属性投影，排除身份、标题、布局和源码引用；`context.node` 保留前端使用的扁平字段。
 - `context.implementation`：由精确 spec 标记或 `impl.implements` 解析的直接函数；`relatedImplementation` 为同一能力的其他节点函数。
@@ -208,7 +178,6 @@ test('[TEST_INCREMENT] 加一返回预期结果', () => {
 - `context.backend.testCases`：逐用例的 `passed/failed/skipped/not-run/stale` 和原生 `verifies`。测试到函数的 `requirement-binding` 表示需求关联；执行覆盖率需要另外采集。
 - `context.evidence.executionState`：测试命令的实际结果；`caseCoverage` 单独统计已索引测试条目的结果完整性，未匹配或跳过的条目不会随总体通过而变绿。
 
-内部节点契约与试运行适配器分开：`avg-compute` 接收 `{count, total, steps}`；原 `/api/average/test` 继续接收 `{values}`，由适配器准备前置步骤，输入说明在 `context.backend.trial`。平均值执行结果的 `observedCalls` 记录本次实际调用的步骤函数与结果呈现函数；它与声明调用、图上数据流分别读取。
 
 ### ubCode 的位置
 
@@ -267,8 +236,7 @@ npm run test:adapters  # 多语言一致性与 HTTP 测试
 | 功能来源、可信路由与能力登记 | `server/feature-registry.mjs`、`features/*/server.mjs` |
 | 需求、节点、函数及验收用例连接 | `server/backend-relations.mjs`、`server/indexed-tests.mjs`；从索引推导 |
 | 实际测试报告与有效性 | `server/capabilities.mjs`、`scripts/test-case-reporter.mjs` |
-| 平均值与共享数字逻辑 | `server/average.mjs`、`server/numeric-values.mjs` |
-| 原计算能力 | `server/calculator.mjs`、`server/sum.mjs`、`server/expression.mjs` |
+| 独立计算器源码、测试与需求 | `project/calculator/` |
 | 工作台与节点面板 | `src/App.tsx`、`src/NodeProperties.tsx`、`src/CapabilityPanel.tsx` |
 | 业务前端操作 | `features/*/client.tsx` |
 | 节点上下文、说明与开发任务生成 | `server/node-context.mjs`；直接依赖整理见 `src/node-context.mjs` |

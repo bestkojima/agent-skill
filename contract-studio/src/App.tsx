@@ -13,6 +13,7 @@ import { NodeDocument } from './NodeDocument';
 import { resolveFeature, visibleFeatures, capabilityDestination } from './feature-navigation.mjs';
 import { NodeProperties } from './NodeProperties';
 import { CapabilityPanel, type Capability } from './CapabilityPanel';
+import { PublishedTests } from './PublishedTests';
 import { importanceLabels, importanceLabel, nodeImportance } from './node-importance.mjs';
 
 type TraceRef={path:string;line:number;source?:'sphinx-codelinks'|'local-marker'};
@@ -20,7 +21,7 @@ type Acceptance={id:string;input:string;expected:string;observable?:string};
 type Requirement={id:string;nodeId:string;nodeIds?:string[];title:string;description:string;status:'draft'|'confirmed';revision:number;code:TraceRef[];tests:TraceRef[];acceptance?:Acceptance[];acceptanceStatus?:'draft'|'confirmed'};
 type RequirementDraft={title:string;description:string;acceptance?:Acceptance[]};
 type Traceability={featureId:string;source:string;projectGraph:Graph;requirements:Requirement[];sphinx:{path:string;state:'current'|'outdated'|'missing'};index?:{state:'current'|'stale'|'failed'|'missing'|'unconfigured';source:string;path:string;builtAt?:string;error?:string;sourceRevision?:unknown};ubcode?:{state:string;message:string}};
-type DisplayNode=FlowNode<{spec:Spec;collapsed:boolean;hasChildren:boolean;run?:Step['status'];derived?:boolean;requirement?:Requirement;hasUnsavedRequirement:boolean;traceAvailable:boolean;toggle:(id:string)=>void;addChild:(id:string)=>void;annotation?:string},'contract'>;
+type DisplayNode=FlowNode<{spec:Spec;readOnly?:boolean;collapsed:boolean;hasChildren:boolean;run?:Step['status'];derived?:boolean;requirement?:Requirement;hasUnsavedRequirement:boolean;traceAvailable:boolean;toggle:(id:string)=>void;addChild:(id:string)=>void;annotation?:string},'contract'>;
 const exampleKey='contract-studio-active-example-v1';
 const clone=<T,>(v:T):T=>JSON.parse(JSON.stringify(v)) as T;
 const toGraph=(text:string):Graph=>{
@@ -53,7 +54,7 @@ function NodeCard({data}:NodeProps<DisplayNode>){
     return <div className={`group-heading importance-${importance} ${isNestedGroup?'nested-group-heading':''}`}>
       {isNestedGroup&&<Handle id="in" type="target" position={Position.Left} className="flow-handle"/>}
       <span className="group-identity"><span className="group-name">{spec.title}</span>{badge}{requirementLabel&&<span className={`group-requirement ${!hasUnsavedRequirement&&requirement?.status==='confirmed'?'confirmed':''}`}>{requirementLabel}</span>}{isNestedGroup&&run&&<span className={`group-run ${run}`}>{runLabel}</span>}</span>
-      <span className="node-actions"><button className="node-add nodrag" aria-label={`在${spec.title}中添加节点`} onClick={e=>{e.stopPropagation();addChild(spec.id)}}>＋ 添加</button><button className="node-toggle nodrag" aria-expanded="true" onClick={(e)=>{e.stopPropagation();toggle(spec.id)}}>折叠 −</button></span>
+      <span className="node-actions">{!data.readOnly&&<button className="node-add nodrag" aria-label={`在${spec.title}中添加节点`} onClick={e=>{e.stopPropagation();addChild(spec.id)}}>＋ 添加</button>}<button className="node-toggle nodrag" aria-expanded="true" onClick={(e)=>{e.stopPropagation();toggle(spec.id)}}>折叠 −</button></span>
       {isNestedGroup&&<><Handle id="ok" type="source" position={Position.Right} style={{top:'36%'}} className="flow-handle"/><Handle id="fail" type="source" position={Position.Right} style={{top:'76%',background:'#c27d56'}} className="flow-handle"/></>}
     </div>;
   }
@@ -62,7 +63,7 @@ function NodeCard({data}:NodeProps<DisplayNode>){
     <div className="node-kicker">{badge}<span>{runLabel}</span></div>
     <div className="node-name">{spec.title}</div>{requirementLabel&&<div className={`node-requirement ${!hasUnsavedRequirement&&requirement?.status==='confirmed'?'confirmed':''}`}>{requirementLabel}</div>}{annotation&&<div className="node-runtime">{annotation}</div>}
     {hasChildren&&<button className="node-toggle nodrag" aria-expanded="false" onClick={(e)=>{e.stopPropagation();toggle(spec.id)}}>展开子节点 +</button>}
-    {spec.kind==='group'&&<button className="node-add nodrag" aria-label={`在${spec.title}中添加节点`} onClick={e=>{e.stopPropagation();addChild(spec.id)}}>＋ 添加</button>}
+    {!data.readOnly&&spec.kind==='group'&&<button className="node-add nodrag" aria-label={`在${spec.title}中添加节点`} onClick={e=>{e.stopPropagation();addChild(spec.id)}}>＋ 添加</button>}
     <Handle id="ok" type="source" position={Position.Right} style={{top:'36%'}} className="flow-handle"/>
     <Handle id="fail" type="source" position={Position.Right} style={{top:'76%',background:'#c27d56'}} className="flow-handle"/>
   </div>;
@@ -148,8 +149,9 @@ function TraceReference({reference,editor,onEditorChange}:{reference:TraceRef;ed
   </div>;
 }
 
-function RequirementPanel({node,compatible,requirement,draft,traceability,loading,error,onRefresh,onSave,onCreate,onDraftChange,onDiscard}:{
+function RequirementPanel({node,compatible,requirement,draft,traceability,loading,error,readOnly,onRefresh,onSave,onCreate,onDraftChange,onDiscard}:{
   node:Spec;compatible:boolean;requirement?:Requirement;traceability:Traceability|null;loading:boolean;error:string;
+  readOnly?:boolean;
   draft?:RequirementDraft;onDraftChange:(id:string,draft:RequirementDraft)=>void;onDiscard:(id:string)=>void;
   onRefresh:()=>void;onSave:(requirement:Requirement,title:string,description:string,action:'save'|'confirm',acceptance?:Acceptance[],confirmAcceptance?:boolean)=>Promise<void>;
   onCreate:(nodeId:string,id:string,title:string,description:string)=>Promise<void>;
@@ -162,7 +164,7 @@ function RequirementPanel({node,compatible,requirement,draft,traceability,loadin
   if(error)return <div className="trace-unavailable"><div className="notice notice-error">无法读取需求关联：{error}</div><button className="link-button" onClick={onRefresh}>重新读取</button></div>;
   if(!traceability)return <div className="empty">尚未读取需求关联。</div>;
   if(!compatible)return <div className="empty">当前画布属于其他功能，项目需求不会按同名节点自动关联。</div>;
-  if(!requirement)return <CreateRequirement key={node.id} node={node} onCreate={onCreate}/>;
+  if(!requirement)return readOnly?<div className="empty">此节点没有关联需求。</div>:<CreateRequirement key={node.id} node={node} onCreate={onCreate}/>;
   const title=draft?.title??requirement.title;
   const description=draft?.description??requirement.description;
   const acceptance=draft?.acceptance??requirement.acceptance??[];
@@ -180,6 +182,9 @@ function RequirementPanel({node,compatible,requirement,draft,traceability,loadin
     <div className="trace-section-title">关联证据 <span>{traceability.index?.source==='sphinx-needs+codelinks'?'Sphinx-Needs / CodeLinks':'本地标记索引'}</span></div>
     {links('实现代码',requirement.code)}{links('相关测试',requirement.tests)}
     <p className="micro">列出的是发现的源码标记，不表示测试已经运行或验证通过。</p>
+    {readOnly?<><h3>{requirement.title}</h3><p>{requirement.description}</p>
+      <ul>{acceptance.map(item=><li key={item.id}><code>{item.id}</code> · {[item.input,item.expected,item.observable].filter(Boolean).join('；')}</li>)}</ul>
+    </>:<>
     <div className="field"><label htmlFor="requirement-title">需求标题</label><input id="requirement-title" value={title} onChange={e=>onDraftChange(requirement.id,{title:e.target.value,description,acceptance})}/></div>
     <div className="field"><label htmlFor="requirement-description">需求描述</label><textarea id="requirement-description" rows={4} value={description} onChange={e=>onDraftChange(requirement.id,{title,description:e.target.value,acceptance})}/></div>
     <div className="acceptance-heading"><strong>验收条件</strong><span className={`requirement-status ${!acceptanceChanged&&requirement.acceptanceStatus==='confirmed'?'confirmed':'draft'}`}>{!acceptanceChanged&&requirement.acceptanceStatus==='confirmed'?'已确认':'待确认'}</span></div>
@@ -187,7 +192,7 @@ function RequirementPanel({node,compatible,requirement,draft,traceability,loadin
     <div className="requirement-actions"><button className="link-button" onClick={addAcceptance}>＋ 添加验收条件</button><button onClick={()=>void save('save',true)} disabled={busy||!acceptance.length||acceptance.some(item=>!item.id.trim()||!item.input.trim()||!item.expected.trim())||(!acceptanceChanged&&requirement.acceptanceStatus==='confirmed')}>确认验收条件</button></div>
     <div className="requirement-actions"><button onClick={()=>void save('save')} disabled={busy||(!changed&&!acceptanceChanged)||!title.trim()||!description.trim()}>保存草稿</button><button className="primary-button" onClick={()=>void save('confirm')} disabled={busy||(!changed&&requirement.status==='confirmed')||!title.trim()||!description.trim()}>{busy?'保存中…':'确认这条需求'}</button>{(changed||acceptanceChanged)&&<button className="link-button" onClick={()=>onDiscard(requirement.id)} disabled={busy}>放弃修改</button>}</div>
     <p className="micro">确认记录当前文字；修改后需重新确认。画布修改先保存在浏览器，需手动保存到项目；业务代码不会自动改写。</p>
-    {formError&&<div className="notice notice-error" role="alert">{formError} <button className="link-button" onClick={onRefresh}>重新读取</button></div>}
+    {formError&&<div className="notice notice-error" role="alert">{formError} <button className="link-button" onClick={onRefresh}>重新读取</button></div>}</>}
     <div className="trace-source">需求文件：{traceability.source} · RST 源文件：{traceability.sphinx.state==='current'?'已同步':traceability.sphinx.state==='outdated'?'待同步':'缺失'}</div>
   </div>;
 }
@@ -199,8 +204,10 @@ function Studio({feature,catalog,client,onFeatureChange,openRequest}:{feature:Fe
   const {graph:JSON_KEY,base:GRAPH_BASE_KEY,pending:GRAPH_PENDING_KEY,requirements:REQUIREMENT_DRAFT_KEY}=feature.draftKeys;
   const traceUrl=`/api/traceability?feature=${encodeURIComponent(feature.id)}`;
   const FeaturePanel=client.Panel;
+  const readOnly=Boolean(feature.publishedTests);
   const [initial]=useState(()=>{
     let graph=clone(original),hasDraft=false,base:Graph|null=null,rawDraft='',draftError='';
+    if(readOnly)return {graph,hasDraft,base,rawDraft,draftError};
     try{rawDraft=localStorage.getItem(JSON_KEY)??'';if(rawDraft){hasDraft=true;graph=toGraph(rawDraft)}}catch(error){draftError=String(error)}
     try{const text=localStorage.getItem(GRAPH_BASE_KEY);if(text)base=toGraph(text)}catch{/* A missing baseline requires explicit reconciliation. */}
     return {graph,hasDraft,base,rawDraft,draftError};
@@ -255,7 +262,7 @@ function Studio({feature,catalog,client,onFeatureChange,openRequest}:{feature:Fe
   };
   const initialCollapsed=()=>new Set<string>(client.initialCollapsed?.(feature)??[]);
   const [collapsed,setCollapsed]=useState<Set<string>>(initialCollapsed);
-  const [tab,setTab]=useState<'property'|'document'|'requirement'|'test'|'code'|'trace'>('property');
+  const [tab,setTab]=useState<'property'|'document'|'requirement'|'test'|'code'|'trace'>(readOnly?'requirement':'property');
   const [importanceView,setImportanceView]=useState(false);
   const [focusId,setFocusId]=useState<string|null>(null);
   const [activeRequirementId,setActiveRequirementId]=useState('');
@@ -346,7 +353,7 @@ function Studio({feature,catalog,client,onFeatureChange,openRequest}:{feature:Fe
       style:{width:focus?232:!folded&&layout.sizes.has(n.id)?layout.sizes.get(n.id)!.width:hasChildren&&!folded?(n.size?.width??970):n.kind==='group'?230:176,height:focus?130:!folded&&layout.sizes.has(n.id)?layout.sizes.get(n.id)!.height:hasChildren&&!folded?(n.size?.height??415):n.kind==='group'?120:116},
       hidden:focus?!focus.ids.has(n.id):hidden(n),selected:n.id===selectedId,
       className:importanceView?(nodeImportance(n.importance)==='normal'?'importance-muted':'importance-emphasis'):undefined,
-      data:{spec:n,hasChildren,collapsed:focus?hasChildren:folded,run:statuses[n.id],derived:derivedNodes.has(n.id),requirement:compatible&&!traceError&&!traceLoading?traceability?.requirements.find(r=>(r.nodeIds??[r.nodeId]).includes(n.id)):undefined,hasUnsavedRequirement:compatible&&!!traceability?.requirements.some(r=>(r.nodeIds??[r.nodeId]).includes(n.id)&&!!requirementDrafts[r.id]&&(requirementDrafts[r.id].title!==r.title||requirementDrafts[r.id].description!==r.description||!sameValue(requirementDrafts[r.id].acceptance??r.acceptance??[],r.acceptance??[]))),traceAvailable:compatible&&!traceError&&!traceLoading,toggle:toggleNode,addChild,annotation:client.nodeAnnotation?.(n,runtimeOptions)},
+      data:{spec:n,readOnly,hasChildren,collapsed:focus?hasChildren:folded,run:statuses[n.id],derived:derivedNodes.has(n.id),requirement:compatible&&!traceError&&!traceLoading?traceability?.requirements.find(r=>(r.nodeIds??[r.nodeId]).includes(n.id)):undefined,hasUnsavedRequirement:compatible&&!!traceability?.requirements.some(r=>(r.nodeIds??[r.nodeId]).includes(n.id)&&!!requirementDrafts[r.id]&&(requirementDrafts[r.id].title!==r.title||requirementDrafts[r.id].description!==r.description||!sameValue(requirementDrafts[r.id].acceptance??r.acceptance??[],r.acceptance??[]))),traceAvailable:compatible&&!traceError&&!traceLoading,toggle:toggleNode,addChild,annotation:client.nodeAnnotation?.(n,runtimeOptions)},
     };
   }),[graph.nodes,byId,collapsed,hidden,selectedId,statuses,derivedNodes,toggleNode,addChild,client,runtimeOptions,traceability,requirementDrafts,compatible,traceError,traceLoading,layout,focus,importanceView]);
   const flowEdges=useMemo<Edge[]>(()=>graph.edges.map(e=>({
@@ -429,7 +436,7 @@ function Studio({feature,catalog,client,onFeatureChange,openRequest}:{feature:Fe
   };
   const exportGraph=()=>{const blob=new Blob([draftReadError?initial.rawDraft:JSON.stringify(graph,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`contract.${example}${draftReadError?'.invalid-draft':''}.json`;a.click();URL.revokeObjectURL(url)};
   const importGraph=async(file?:File)=>{if(!file)return;try{const g=toGraph(await file.text());setDraftReadError('');setFocusId(null);setGraph(g);setSelectedId(g.nodes[0]?.id??'');setTrace([]);setCollapsed(initialCollapsed());setFitVersion(n=>n+1);setGraphMessage(null)}catch(e){setGraphMessage({tone:'error',text:`无法导入画布：${String(e)}`})}};
-  const selectNode=(id:string)=>{setSelectedId(id);setError('');setPanelOpen(true);setTab('property')};
+  const selectNode=(id:string)=>{setSelectedId(id);setError('');setPanelOpen(true);setTab(readOnly?'requirement':'property')};
   const selectedPath:Spec[]=[];
   {let current=selected;const seen=new Set<string>();while(current&&!seen.has(current.id)){seen.add(current.id);selectedPath.unshift(current);current=current.parentId?byId.get(current.parentId):undefined}}
   const onFullRun=(run:Run)=>{setTrace(run.trace??[]);setNodeResult(run);setError('')};
@@ -446,26 +453,26 @@ function Studio({feature,catalog,client,onFeatureChange,openRequest}:{feature:Fe
   };
   const graphStatus=!graphReady?'正在读取项目图…':traceError?'无法读取项目图，浏览器草稿仍可编辑':!graphCompatible?'画布功能与项目图不匹配':graphConflict?'项目图已变更，本地草稿未覆盖':!graphBase?'浏览器草稿缺少项目基线':graphDirty?'浏览器草稿 · 未保存到项目':'已与项目图同步';
   return <div className="studio-shell">
-    <header className="topbar"><div className="brand"><div className="brand-symbol">◇</div><div><strong>Contract Studio</strong><span>让功能可见，让实现可验</span></div></div><div className="top-actions"><button onClick={()=>void saveGraph()} disabled={!!draftReadError||!graphReady||graphBusy||!!traceError||!graphCompatible||!graphBase||graphConflict||!graphDirty} className="save-project">{graphBusy?'处理中…':'保存到项目'}</button><button onClick={exportGraph}>导出 JSON</button><button onClick={()=>fileRef.current?.click()} disabled={!graphReady}>导入</button><button onClick={()=>{if(draftReadError&&!window.confirm('重置会替换被拒绝的草稿，请先导出需要保留的原稿。继续吗？'))return;setDraftReadError('');setFocusId(null);setGraph(clone(original));setSelectedId(defaultSelected);setCollapsed(initialCollapsed());setTrace([]);setFitVersion(n=>n+1)}} disabled={!graphReady}>重置画布</button><input hidden type="file" ref={fileRef} accept=".json,application/json" onChange={e=>{void importGraph(e.target.files?.[0]);e.target.value=''}}/></div></header>
+    <header className="topbar"><div className="brand"><div className="brand-symbol">◇</div><div><strong>Contract Studio</strong><span>让功能可见，让实现可验</span></div></div>{!readOnly&&<div className="top-actions"><button onClick={()=>void saveGraph()} disabled={!!draftReadError||!graphReady||graphBusy||!!traceError||!graphCompatible||!graphBase||graphConflict||!graphDirty} className="save-project">{graphBusy?'处理中…':'保存到项目'}</button><button onClick={exportGraph}>导出 JSON</button><button onClick={()=>fileRef.current?.click()} disabled={!graphReady}>导入</button><button onClick={()=>{if(draftReadError&&!window.confirm('重置会替换被拒绝的草稿，请先导出需要保留的原稿。继续吗？'))return;setDraftReadError('');setFocusId(null);setGraph(clone(original));setSelectedId(defaultSelected);setCollapsed(initialCollapsed());setTrace([]);setFitVersion(n=>n+1)}} disabled={!graphReady}>重置画布</button><input hidden type="file" ref={fileRef} accept=".json,application/json" onChange={e=>{void importGraph(e.target.files?.[0]);e.target.value=''}}/></div>}</header>
     <div className="subheader"><div className="example-switcher"><label htmlFor="studio-example">功能工作区</label><select id="studio-example" value={example} onChange={e=>onFeatureChange(e.target.value)}>{visibleFeatures(catalog,example).map(item=><option key={item.alias} value={item.alias}>{item.title}</option>)}</select></div><span className="sub-caption">需求 · 功能图 · 实现与测试</span></div>
     <div className="workspace">
       <section className={`canvas with-feature-panel ${focus?'is-focused':''}`}>
-        <div className="canvas-header"><strong>功能流程</strong><span>点击编辑节点；在功能组内添加子节点</span><button onClick={()=>toggle(rootId)}>{collapsed.has(rootId)?'展开全部':'折叠功能'}</button></div>
+        <div className="canvas-header"><strong>功能流程</strong><span>{readOnly?'点击节点查看需求、代码和报告':'点击编辑节点；在功能组内添加子节点'}</span><button onClick={()=>toggle(rootId)}>{collapsed.has(rootId)?'展开全部':'折叠功能'}</button></div>
         <div className="graph-view-controls" role="group" aria-label="图视图"><button aria-pressed={importanceView} onClick={()=>setImportanceView(value=>!value)}>重点视图</button><button disabled={!selected} onClick={()=>{setFocusId(selectedId);setPanelOpen(false);setFitVersion(value=>value+1)}}>聚焦节点</button><button onClick={()=>{setFocusId(null);setFitVersion(value=>value+1)}}>{focus?'返回总览':'适合画布'}</button><span>{focus?'局部投影 · 布局只读，原图位置保持不变':importanceView?'突出核心与关键逻辑，保留全部连线':'全图 · 拖动节点可调整项目布局'}</span></div>
         {focus&&<nav className="focus-path" aria-label="聚焦节点的所属功能"><span>所在功能</span>{focus.ancestors.map(item=><button key={item.id} onClick={()=>{setFocusId(item.id);setSelectedId(item.id)}}>{item.title} ›</button>)}<strong>{byId.get(focusId!)?.title??'项目根节点'}</strong></nav>}
         <div className="importance-legend" aria-label="逻辑重要性图例"><span>逻辑重要性</span>{Object.entries(importanceLabels).map(([value,label])=><span className={`importance-badge importance-${value}`} key={value}>{label}</span>)}</div>
-        <div className={`graph-sync ${graphConflict||!graphBase?'attention':''}`} role="status"><span>{graphStatus}</span><div><button onClick={refreshTraceability} disabled={!graphReady||graphBusy||traceLoading}>刷新状态</button><button onClick={()=>void loadProjectGraph()} disabled={!graphReady||graphBusy}>读取项目图</button>{graphCompatible&&(graphConflict||!graphBase)&&<button onClick={()=>void rebaseGraph()} disabled={graphBusy}>保留草稿并更新基线</button>}</div></div>
+        <div className={`graph-sync ${graphConflict||!graphBase?'attention':''}`} role="status"><span>{graphStatus}</span><div><button onClick={refreshTraceability} disabled={!graphReady||graphBusy||traceLoading}>刷新状态</button><button onClick={()=>void loadProjectGraph()} disabled={!graphReady||graphBusy}>读取项目图</button>{!readOnly&&graphCompatible&&(graphConflict||!graphBase)&&<button onClick={()=>void rebaseGraph()} disabled={graphBusy}>保留草稿并更新基线</button>}</div></div>
         <div className={`index-status ${traceability?.index?.state??'missing'}`} role="status"><span><b>需求索引</b> · {indexBusy?'正在构建…':traceability?.index?({current:'已构建 · 当前',stale:'源已变化 · 待重建',failed:'构建失败',missing:'尚未构建',unconfigured:'未配置构建工具'} as const)[traceability.index.state]:'正在读取'}{traceability?.index?.source==='local-marker'?' · 本地标记兼容视图':' · Sphinx-Needs / CodeLinks'}</span><button className="link-button" disabled={indexBusy||traceLoading||!traceability} onClick={()=>void buildIndex()}>重建索引</button></div>
         {traceability?.ubcode&&<div className="index-tool-note">ubCode：{traceability.ubcode.message}</div>}
         {(indexError||traceability?.index?.error)&&<div className="graph-message error" role="alert">{indexError||traceability?.index?.error}</div>}
         {draftReadError&&<div className="graph-message error" role="alert">浏览器草稿读取被拒绝：{draftReadError}。原始草稿已保留，当前显示项目示例且暂停自动保存；“导出 JSON”可备份原稿，再读取项目图或导入修正版。</div>}
         {graphMessage&&<div className={`graph-message ${graphMessage.tone}`} role={graphMessage.tone==='error'?'alert':'status'}>{graphMessage.text}</div>}
-        <ReactFlow style={focus?{height:Math.max(480,...[...focus.positions.values()].map(position=>position.y+230))}:undefined} nodes={flowNodes} edges={flowEdges} nodesDraggable={graphReady&&!focusId} nodesConnectable={graphReady} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} onNodeClick={(_,n)=>selectNode(n.id)} onNodeDoubleClick={(_,n)=>{if(graph.nodes.some(x=>x.parentId===n.id))toggleNode(n.id)}} onPaneClick={(event)=>{if(event.detail===2&&graphReady)addChild(rootId)}} fitView fitViewOptions={{padding:.06}} minZoom={.2} maxZoom={1.5} zoomOnScroll={false} preventScrolling={false} deleteKeyCode={null} defaultEdgeOptions={{type:'branch'}}>
+        <ReactFlow style={focus?{height:Math.max(480,...[...focus.positions.values()].map(position=>position.y+230))}:undefined} nodes={flowNodes} edges={flowEdges} nodesDraggable={!readOnly&&graphReady&&!focusId} nodesConnectable={!readOnly&&graphReady} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} onNodeClick={(_,n)=>selectNode(n.id)} onNodeDoubleClick={(_,n)=>{if(graph.nodes.some(x=>x.parentId===n.id))toggleNode(n.id)}} onPaneClick={(event)=>{if(!readOnly&&event.detail===2&&graphReady)addChild(rootId)}} fitView fitViewOptions={{padding:.06}} minZoom={.2} maxZoom={1.5} zoomOnScroll={false} preventScrolling={false} deleteKeyCode={null} defaultEdgeOptions={{type:'branch'}}>
           <Background gap={22} size={1} color="#e6ebf0"/><Controls position="bottom-left" showInteractive={false}/>
           <Fit value={fitVersion} focusId={focusId}/>
         </ReactFlow>
-        <div className="canvas-footer"><span>在功能组里添加节点，也可双击空白处添加。连线表示业务数据与分支。</span><span>当前显示 {flowNodes.filter(node=>!node.hidden).length} 节点 · {flowEdges.filter(edge=>!edge.hidden).length} 条边 <small>全图 {graph.nodes.length} 节点 · {graph.edges.length} 条边</small></span></div>
-        <div className="feature-outlet" id="feature-outlet"><FeaturePanel feature={feature} onRun={onFullRun} runtimeOptions={runtimeOptions} onRuntimeOptionsChange={options=>{setRuntimeOptions(options);setNodeResult(null);setSource(null);setTrace([])}} openRequest={openRequest}/></div>
+        <div className="canvas-footer"><span>{readOnly?'独立项目 · 节点图基于项目规格与源码索引':'在功能组里添加节点，也可双击空白处添加。连线表示业务数据与分支。'}</span><span>当前显示 {flowNodes.filter(node=>!node.hidden).length} 节点 · {flowEdges.filter(edge=>!edge.hidden).length} 条边 <small>全图 {graph.nodes.length} 节点 · {graph.edges.length} 条边</small></span></div>
+        {!readOnly&&<div className="feature-outlet" id="feature-outlet"><FeaturePanel feature={feature} onRun={onFullRun} runtimeOptions={runtimeOptions} onRuntimeOptionsChange={options=>{setRuntimeOptions(options);setNodeResult(null);setSource(null);setTrace([])}} openRequest={openRequest}/></div>}
       </section>
       <aside className={`right-side node-drawer ${panelOpen?'is-open':''}`} aria-label="节点详情">
         <section className="inspector" hidden={!panelOpen}>
@@ -474,18 +481,19 @@ function Studio({feature,catalog,client,onFeatureChange,openRequest}:{feature:Fe
             {selectedPath.length>1&&<nav className="node-path" aria-label="功能层级">{selectedPath.map((part,index)=><span key={part.id}>{index>0&&<span className="path-separator" aria-hidden="true">›</span>}{index===selectedPath.length-1?<strong aria-current="location">{part.title}</strong>:<button type="button" onClick={()=>selectNode(part.id)}>{part.title}</button>}</span>)}</nav>}
             <p className="description">{selected.description}</p>
             <div className="info-pair"><span>输入</span><b>{selected.input}</b></div><div className="info-pair"><span>输出</span><b>{selected.output}</b></div>
-            <div className="tabs">{(['property','document','requirement','test','trace','code'] as const).map(t=><button key={t} className={tab===t?'active':''} onClick={()=>setTab(t)}>{t==='property'?'节点属性':t==='document'?'文档与任务':t==='requirement'?'需求关联':t==='test'?'运行与测试':t==='trace'?'日志':'实现映射'}</button>)}</div>
-            {tab==='property'&&<NodeProperties key={selected.id} node={selected} nodes={graph.nodes} capabilities={capabilities} onPatch={update} onSave={()=>void saveGraph()} saving={graphBusy} canSave={!draftReadError&&graphDirty&&!graphConflict&&graphCompatible&&!!graphBase&&!!selected.title.trim()} onRemove={selected.id===rootId?undefined:remove}/>}
+            <div className="tabs">{(['property','document','requirement','test','trace','code'] as const).filter(t=>!readOnly||!['property','trace'].includes(t)).map(t=><button key={t} className={tab===t?'active':''} onClick={()=>setTab(t)}>{t==='property'?'节点属性':t==='document'?'文档与任务':t==='requirement'?'需求关联':t==='test'?(readOnly?'测试报告':'运行与测试'):t==='trace'?'日志':'实现映射'}</button>)}</div>
+            {tab==='property'&&!readOnly&&<NodeProperties key={selected.id} node={selected} nodes={graph.nodes} capabilities={capabilities} onPatch={update} onSave={()=>void saveGraph()} saving={graphBusy} canSave={!draftReadError&&graphDirty&&!graphConflict&&graphCompatible&&!!graphBase&&!!selected.title.trim()} onRemove={selected.id===rootId?undefined:remove}/>}
             {tab==='document'&&<NodeDocument featureId={feature.id} graph={graph} nodeId={selected.id} dirty={!projectGraph||!sameValue(graph,projectGraph)} sourceVersion={traceability}/>}
             {tab==='requirement'&&<>
               {compatible&&!traceLoading&&!traceError&&<div className="requirement-picker">
                 {selectedRequirements.length>0&&<div className="field"><label htmlFor="node-requirement">关联需求 · {selectedRequirements.length} 条</label><select id="node-requirement" value={creatingRequirement?'':selectedRequirement?.id??''} onChange={event=>{setActiveRequirementId(event.target.value);setCreatingRequirement(false)}}>{creatingRequirement&&<option value="">正在创建新需求</option>}{selectedRequirements.map(requirement=><option key={requirement.id} value={requirement.id}>{requirement.id} · {requirement.title}</option>)}</select></div>}
-                <details><summary>关联已有需求或新增需求</summary><div className="requirement-link-row"><select aria-label="选择已有需求" value={linkRequirementId} onChange={event=>setLinkRequirementId(event.target.value)}><option value="">选择已有需求</option>{traceability?.requirements.filter(requirement=>!(requirement.nodeIds??[requirement.nodeId]).includes(selectedId)).map(requirement=><option key={requirement.id} value={requirement.id}>{requirement.id} · {requirement.title}</option>)}</select><button className="link-button" disabled={!linkRequirementId||linkBusy||!projectGraph?.nodes.some(node=>node.id===selectedId)} onClick={()=>void linkRequirement()}>关联</button></div><button className="link-button" onClick={()=>setCreatingRequirement(true)}>＋ 创建新需求</button>{!projectGraph?.nodes.some(node=>node.id===selectedId)&&<p className="micro">先将新节点保存到项目，再关联需求。</p>}</details>
+                {!readOnly&&<details><summary>关联已有需求或新增需求</summary><div className="requirement-link-row"><select aria-label="选择已有需求" value={linkRequirementId} onChange={event=>setLinkRequirementId(event.target.value)}><option value="">选择已有需求</option>{traceability?.requirements.filter(requirement=>!(requirement.nodeIds??[requirement.nodeId]).includes(selectedId)).map(requirement=><option key={requirement.id} value={requirement.id}>{requirement.id} · {requirement.title}</option>)}</select><button className="link-button" disabled={!linkRequirementId||linkBusy||!projectGraph?.nodes.some(node=>node.id===selectedId)} onClick={()=>void linkRequirement()}>关联</button></div><button className="link-button" onClick={()=>setCreatingRequirement(true)}>＋ 创建新需求</button>{!projectGraph?.nodes.some(node=>node.id===selectedId)&&<p className="micro">先将新节点保存到项目，再关联需求。</p>}</details>}
                 {linkError&&<div className="notice notice-error" role="alert">{linkError}</div>}
               </div>}
-              <RequirementPanel key={`${selected.id}:${creatingRequirement?'new':selectedRequirement?.id??'new'}:${selectedRequirement?.revision??0}`} node={selected} compatible={compatible} requirement={creatingRequirement?undefined:selectedRequirement} draft={!creatingRequirement&&selectedRequirement?requirementDrafts[selectedRequirement.id]:undefined} traceability={traceability} loading={traceLoading} error={traceError} onRefresh={refreshTraceability} onSave={saveRequirement} onCreate={async(...args)=>{await createRequirement(...args);setActiveRequirementId(args[1]);setCreatingRequirement(false)}} onDraftChange={changeDraft} onDiscard={discardDraft}/>
+              <RequirementPanel key={`${selected.id}:${creatingRequirement?'new':selectedRequirement?.id??'new'}:${selectedRequirement?.revision??0}`} node={selected} compatible={compatible} readOnly={readOnly} requirement={creatingRequirement?undefined:selectedRequirement} draft={!creatingRequirement&&selectedRequirement?requirementDrafts[selectedRequirement.id]:undefined} traceability={traceability} loading={traceLoading} error={traceError} onRefresh={refreshTraceability} onSave={saveRequirement} onCreate={async(...args)=>{await createRequirement(...args);setActiveRequirementId(args[1]);setCreatingRequirement(false)}} onDraftChange={changeDraft} onDiscard={discardDraft}/>
             </>}
-            {tab==='test'&&<div className="inspector-body">
+            {tab==='test'&&readOnly&&<PublishedTests featureId={feature.id} nodeId={selected.id}/>}
+             {tab==='test'&&!readOnly&&<div className="inspector-body">
               <CapabilityPanel key={selectedCapability?.id??selected.id} capability={selectedCapability} onOpen={openCapability}/>
               <div className="property-section-title">节点试运行</div>
               <div className="field"><label>试运行输入 JSON</label><textarea className="json-area" rows={5} spellCheck={false} value={fixture} onChange={e=>setFixture(e.target.value)}/></div>
@@ -520,7 +528,7 @@ export default function App(){
   };
   if(error)return <main className="catalog-state" role="alert"><h1>工作区目录读取失败</h1><p>{error}</p><button className="primary-button" onClick={()=>window.location.reload()}>重新读取</button></main>;
   if(!catalog||!feature)return <main className="catalog-state" role="status">正在读取功能工作区…</main>;
-  const client=featureClients[feature.frontend.entry];
+  const client=feature.publishedTests?{Panel:()=>null}:featureClients[feature.frontend.entry];
   if(!client)return <main className="catalog-state" role="alert">前端入口 {feature.frontend.entry} 尚未注册。请添加对应 features/{feature.frontend.entry}/client.tsx。</main>;
   return <ReactFlowProvider key={feature.alias}><Studio feature={feature} catalog={catalog} client={client} onFeatureChange={changeFeature} openRequest={openRequest}/></ReactFlowProvider>;
 }

@@ -1,0 +1,64 @@
+{
+  "version": 2,
+  "feature": {
+    "id": "calculator.suite",
+    "title": "Windows 计算器",
+    "goal": "观察独立桌面应用的需求、实现和验证"
+  },
+  "nodes": [],
+  "edges": [],
+  "_needsLayout": {
+    "SPEC_PYCALC_RUN": {
+      "position": {
+        "x": 36,
+        "y": 30
+      },
+      "size": {
+        "width": 980,
+        "height": 640
+      }
+    },
+    "SPEC_PYCALC_PARSE": {
+      "position": {
+        "x": 38,
+        "y": 95
+      }
+    },
+    "SPEC_PYCALC_OPERATE": {
+      "position": {
+        "x": 348,
+        "y": 95
+      }
+    },
+    "SPEC_PYCALC_LIST": {
+      "position": {
+        "x": 38,
+        "y": 280
+      }
+    },
+    "SPEC_PYCALC_SUM": {
+      "position": {
+        "x": 348,
+        "y": 280
+      }
+    },
+    "SPEC_PYCALC_AVERAGE": {
+      "position": {
+        "x": 658,
+        "y": 280
+      }
+    },
+    "SPEC_PYCALC_FORMAT": {
+      "position": {
+        "x": 348,
+        "y": 465
+      }
+    },
+    "SPEC_PYCALC_UI": {
+      "position": {
+        "x": 658,
+        "y": 465
+      }
+    }
+  }
+}

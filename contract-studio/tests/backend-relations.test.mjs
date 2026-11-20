@@ -3,22 +3,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import { backendRelations, nodeBackend, indexedCapabilityBindings, functionNeedId, nodeNeedId, acceptanceNeedId } from '../server/backend-relations.mjs';
 import { featureRegistry, createFeatureRegistry } from '../server/feature-registry.mjs';
-import { runAverage, testAverageNode } from '../server/average.mjs';
 
 const entity=(symbol,needIds,extra={})=>({path:'server/units.mjs',symbol,needIds,signature:`function ${symbol}(value) {`,startLine:2,endLine:4,kind:'function',language:'javascript',markerLines:[1],source:'sphinx-codelinks',indexState:'current',...extra});
 const spec=(id,nodeId,fulfills,extra={})=>({id,type:'spec',node_id:nodeId,fulfills,...extra});
 const emptyRegistry=()=>createFeatureRegistry([]);
 
-async function averageModel() {
-  const graph=JSON.parse(await fs.readFile(new URL('../contracts/calculator-suite.json',import.meta.url),'utf8'));
-  const {requirements}=JSON.parse(await fs.readFile(new URL('../contracts/calculator-suite.requirements.json',import.meta.url),'utf8'));
-  const feature=featureRegistry.resolveFeature('suite');
-  const needs=Object.fromEntries(graph.nodes.map(node=>{
-    const id=nodeNeedId(node.id,feature);
-    return [id,spec(id,node.id,requirements.filter(r=>(r.nodeIds??[r.nodeId]).includes(node.id)).map(r=>r.id))];
-  }));
-  return {graph,requirements,model:backendRelations(graph,requirements,{feature,needs})};
-}
 
 test('exact spec markers determine functions; a shared requirement cannot smear functions across nodes',()=>{
   const graph={nodes:[{id:'left',needId:'SPEC_LEFT'},{id:'right',needId:'SPEC_RIGHT'}],edges:[{id:'data',source:'left',target:'right'}]};
@@ -89,25 +78,4 @@ test('missing indexes do not resurrect code strings or old hand-maintained assoc
   assert.deepEqual(backendRelations(graph,[{id:'REQ_ONE',nodeId:'one'}],{registry}).functions,[]);
   assert.equal(acceptanceNeedId('REQ_X','AC.ONE'),'REQ_X.PART_41432E4F4E45');
   assert.notEqual(acceptanceNeedId('REQ_X','AC.ONE'),acceptanceNeedId('REQ_X','PART_41432E4F4E45'));
-});
-
-test('average contracts describe actual internal inputs and preserve raw-input node trials',async()=>{
-  const {graph,model}=await averageModel();
-  const raw={values:Array.from({length:20},(_,i)=>i+1)};
-  const run=await runAverage(raw);
-  for(const step of run.trace) {
-    const node=graph.nodes.find(node=>node.id===step.nodeId);
-    for(const key of node.inputSchema.required)assert.ok(Object.hasOwn(step.input,key),`${step.nodeId} input.${key}`);
-    const output=node.outputSchema.oneOf.find(schema=>schema.properties.status.const===step.output.status);
-    for(const key of output.required)assert.ok(Object.hasOwn(step.output,key),`${step.nodeId} output.${key}`);
-  }
-  assert.deepEqual(run.trace.at(-1).input,run.trace[1].output);
-  const node=nodeBackend(model,'avg-compute');
-  assert.deepEqual(node.inputSchema.required,['count','total','steps']);
-  assert.deepEqual(node.trial.inputSchema.required,['values']);
-  assert.equal((await testAverageNode('avg-compute',raw,'dry-run')).output.value,10.5);
-  assert.deepEqual(run.observedCalls.map(call=>call.callee.symbol),['validateAverageInput','accumulateAverage','computeAverage','averageUi']);
-  assert.ok(run.observedCalls.every(call=>call.source==='runtime'&&call.caller.symbol==='runAverage'));
-  assert.deepEqual((await runAverage({values:[]})).observedCalls.map(call=>call.callee.symbol),['validateAverageInput','averageUi']);
-  assert.deepEqual((await runAverage({values:[1e308,1e308]})).observedCalls.map(call=>call.callee.symbol),['validateAverageInput','accumulateAverage','averageUi']);
 });

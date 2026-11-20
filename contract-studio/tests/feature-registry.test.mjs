@@ -28,20 +28,20 @@ test('可信业务声明一次连接图来源、前端、路由和能力，新�
   assert.throws(()=>createFeatureRegistry([{...bundle,routes:[]}]),/Missing trusted routes/);
 });
 
-test('目录保留全部旧 URL、草稿标识和默认入口，目录响应不暴露处理函数',async()=>{
+test('目录保留默认入口并将桌面项目声明为外部报告来源',async()=>{
   const response=await request('GET','/api/features');
   assert.equal(response.statusCode,200);
   const {defaultFeature,features,capabilities}=response.body;
   assert.equal(defaultFeature,'suite');
   assert.equal(featureRegistry.defaultTrace.alias,'feedback');
-  assert.deepEqual(features.map(feature=>feature.alias),['suite','calculator','sum','expression','feedback']);
+  assert.deepEqual(features.map(feature=>feature.alias),['suite','feedback']);
   for(const feature of features){
     assert.equal(feature.graph.feature.id,feature.id);
-    assert.ok(feature.graph.nodes.some(node=>node.id===feature.rootNodeId));
-    assert.equal(feature.frontend.path,`features/${feature.frontend.entry}/client.tsx`);
+    if(!feature.publishedTests)assert.ok(feature.graph.nodes.some(node=>node.id===feature.rootNodeId));
+    if(!feature.publishedTests)assert.equal(feature.frontend.path,`features/${feature.frontend.entry}/client.tsx`);
     assert.equal(featureRegistry.resolveFeature(feature.alias).id,feature.id);
     if(feature.alias==='feedback')assert.deepEqual(feature.draftKeys,{graph:'contract-studio-adapters-v03',base:'contract-studio-project-graph-base-v1',pending:'contract-studio-project-graph-pending-v1',requirements:'contract-studio-requirement-drafts-v1'});
-    else assert.deepEqual(feature.draftKeys,{graph:`contract-studio-${feature.alias}-graph-v1`,base:`contract-studio-${feature.alias}-graph-base-v1`,pending:`contract-studio-${feature.alias}-graph-pending-v1`,requirements:`contract-studio-${feature.alias}-requirement-drafts-v1`});
+    else assert.equal(feature.publishedTests.path,"project/calculator/_build/test-results.json");
   }
   for(const capability of capabilities)assert.ok(features.some(feature=>feature.alias===capability.frontend.feature&&feature.frontend.entry===capability.frontend.entry));
   assert.equal(JSON.stringify(response.body).includes('handle'),false);
@@ -57,28 +57,12 @@ test('追踪旧别名与规范 ID 共用来源，未知声明在读取及更新�
   assert.equal((await request('GET','/api/traceability')).body.featureId,'feedback.submit');
   assert.equal((await request('GET','/api/traceability?feature=')).body.featureId,'feedback.submit');
   assert.equal((await request('GET','/api/traceability?feature=calculator.suite')).body.featureId,'calculator.suite');
+  assert.equal((await request('GET','/api/traceability?feature=suite')).body.source,'project/calculator/requirements.rst');
+  for(const url of ['/api/traceability/graph','/api/traceability/requirement'])assert.equal((await request('POST',url,{featureId:'suite'})).statusCode,403);
+  assert.equal((await request('POST','/api/average',{values:[1,2,3]})).statusCode,404);
   for(const url of ['/api/traceability?feature=unknown','/api/node-context?feature=unknown&nodeId=suite'])assert.equal((await request('GET',url)).statusCode,404);
   for(const url of ['/api/traceability/build','/api/traceability/graph','/api/traceability/requirement'])assert.equal((await request('POST',url,{featureId:'unknown'})).statusCode,404);
   const code=await request('GET','/api/code?nodeId=form');
   assert.equal(code.statusCode,200);assert.equal(code.body.file,'features/feedback/client.tsx');
   assert.match(code.body.excerpt,/function FeedbackPreview/);
-});
-
-test('节点上下文接口共享保存态和预览，返回草稿来源并保持项目图',async()=>{
-  const catalog=await featureCatalog();const graph=catalog.features.find(feature=>feature.alias==='suite').graph;
-  const before=JSON.stringify(graph);
-  const saved=await request('GET','/api/node-context?feature=suite&nodeId=avg-compute');
-  assert.equal(saved.statusCode,200);assert.equal(saved.body.context.node.id,'avg-compute');
-  assert.equal(saved.body.context.provenance.graph,'saved');
-  graph.nodes.find(node=>node.id==='avg-compute').description+=' draft';
-  const preview=await request('POST','/api/node-context/preview',{featureId:'calculator.suite',nodeId:'avg-compute',graph});
-  assert.equal(preview.statusCode,200);assert.equal(preview.body.context.provenance.graph,'draft');
-  assert.equal(preview.body.context.provenance.semanticChanges,true);
-  assert.equal(preview.body.context.evidence.coversCurrentGraph,false);
-  assert.match(preview.body.markdown,/draft/);assert.match(preview.body.taskMarkdown,/draft/);
-  assert.equal(JSON.stringify((await featureCatalog()).features.find(feature=>feature.alias==='suite').graph),before);
-  assert.equal((await request('GET','/api/node-context?feature=suite&nodeId=missing')).statusCode,404);
-  assert.equal((await request('POST','/api/node-context/preview',{featureId:'calculator.suite',nodeId:'suite'})).statusCode,400);
-  for(const url of ['/api/features','/api/node-context?feature=suite&nodeId=suite'])assert.equal((await request('GET',url,undefined,{origin:'https://example.org'})).statusCode,403);
-  assert.equal((await request('POST','/api/node-context/preview',{featureId:'calculator.suite',nodeId:'suite',graph},{origin:'https://example.org'})).statusCode,403);
 });

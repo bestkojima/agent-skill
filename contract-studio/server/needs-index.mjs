@@ -28,7 +28,7 @@ export async function sourceRevision(root) {
       }
     }
   }
-  for(const dir of ['contracts','src','server','features','tests','traceability'])await walk(dir);
+  for(const dir of ['contracts','src','server','features','tests','traceability','project'])await walk(dir);
   for(const file of ['pyproject.toml','uv.lock','scripts/build-needs.py'])if(await exists(path.join(root,file))){const stat=await fs.stat(path.join(root,file));files[file]={size:stat.size,mtimeMs:stat.mtimeMs};}
   return files;
 }

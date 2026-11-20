@@ -278,14 +278,14 @@ export async function openTraceability(root = projectRoot) {
         const found=[...(refs.get(id)??[]),...implementation,...tests.flatMap(test=>refs.get(test.id)??[])];
         return [...new Map(found.map(ref=>[`${ref.path}:${ref.line}`,ref])).values()];
       };
-      return {featureId:data.featureId,source:feature.requirementFile,projectGraph:graph,sphinx:{path:feature.rstFile,state},index,backend,
+      return {featureId:data.featureId,source:feature.requirementsSource??feature.requirementFile,projectGraph:graph,sphinx:{path:feature.rstFile,state},index,backend,
         relations:Object.values(needs).filter(need=>need.type==='spec').map(need=>({id:need.id,title:need.title,importance:nodeImportance(need.importance),fulfills:need.fulfills??[],contains:need.contains??[],flowsTo:need.flows_to??[]})),
         ubcode:{state:'not-connected',message:'未接入（可选）'},
         requirements:requirements.map(r=>({...r,
           ...(index.state==='current'&&needs[r.id]&&!r.sourceDocument?{title:needs[r.id].title,status:needs[r.id].status}:{}),
           nodeIds:nodeIdsOf(r),acceptance:acceptanceOf(r),acceptanceStatus:r.acceptanceStatus??'draft',
-          code:requirementRefs(r.id).filter(ref=>!ref.path.startsWith('tests/')),
-          tests:requirementRefs(r.id).filter(ref=>ref.path.startsWith('tests/'))}))};
+          code:requirementRefs(r.id).filter(ref=>!/(^|\/)tests\//.test(ref.path)),
+          tests:requirementRefs(r.id).filter(ref=>/(^|\/)tests\//.test(ref.path))}))};
     })());
     const saved=await views.get(feature.id);
     if(featureId!==undefined&&saved.featureId!==featureId)throw new TraceError('需求文件的功能 ID 不匹配');

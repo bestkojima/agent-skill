@@ -13,7 +13,7 @@ const python=path.join(project,process.platform==='win32'?'.venv/Scripts/python.
 async function fixture(t,{configured=false}={}) {
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'studio-index-'));
   t.after(()=>fs.rm(root,{recursive:true,force:true}));
-  for(const dir of ['contracts','src','features/demo','server','tests','traceability','server/adapters/impl/java','server/adapters/impl/php','server/adapters/impl/cpp'])await fs.mkdir(path.join(root,dir),{recursive:true});
+  for(const dir of ['contracts','project/calculator','src','features/demo','server','tests','traceability','server/adapters/impl/java','server/adapters/impl/php','server/adapters/impl/cpp'])await fs.mkdir(path.join(root,dir),{recursive:true});
   await fs.writeFile(path.join(root,'contracts/requirements.json'),JSON.stringify({version:1,featureId:'demo',requirements:[{id:'REQ_ONE',nodeId:'one',title:'原需求',description:'原描述',status:'draft',revision:1}]}));
   await fs.writeFile(path.join(root,'contracts/feedback.json'),JSON.stringify({version:2,feature:{id:'demo',title:'示例',goal:'验证'},nodes:[{id:'one',title:'功能一',input:'In',output:'Out',parentId:null,position:{x:0,y:0}},{id:'two',title:'功能二',input:'In',output:'Out',parentId:'one',position:{x:10,y:0}}],edges:[{id:'e',source:'one',target:'two',sourceHandle:'ok',label:'有效'}]}));
   await fs.writeFile(path.join(root,'src/demo.ts'),'// @need-ids: REQ_ONE\nexport const value=1;\n');
@@ -212,42 +212,4 @@ test('原生 CodeLinks 声明自动生成实体、验收关联和安全定位',{
   assert.ok(failed.needs.TEST_NATIVE);
   assert.deepEqual(failed.refs.get('TEST_NATIVE'),[]);
   await assert.rejects(sourceAt('tests/native.test.mjs',3,root),error=>error.status===404);
-});
-
-test('显式重建同步 suite 的三个外部修改来源并真正恢复 current',{skip:!existsSync(python)&&'先运行 uv sync --locked 启用真实 Sphinx 集成测试'},async t=>{
-  const root=await fixture(t,{configured:true});
-  for(const file of ['server/average.mjs','tests/average.test.mjs'])await fs.copyFile(path.join(project,file),path.join(root,file));
-  for(const name of ['calculator','sum','expression','calculator-suite']) {
-    for(const suffix of ['.json','.requirements.json'])await fs.copyFile(path.join(project,'contracts',name+suffix),path.join(root,'contracts',name+suffix));
-  }
-  await fs.copyFile(path.join(project,'traceability/index.rst'),path.join(root,'traceability/index.rst'));
-  await fs.appendFile(path.join(root,'traceability/index.rst'),'\n.. test:: Independent test\n   :id: TEST_ONE\n');
-  // The no-feature CLI path must export every existing registered source pair.
-  let result=await buildTraceabilityIndex(root,undefined,{python});
-  assert.equal(result.index.state,'current',result.index.error);
-  for(const name of ['calculator','sum','expression','calculator-suite'])assert.equal(existsSync(path.join(root,'traceability',name+'.rst')),true);
-  const modified=[];
-  for(const name of ['calculator','sum','expression']) {
-    const file=path.join(root,'contracts',name+'.requirements.json');
-    const data=JSON.parse(await fs.readFile(file,'utf8'));
-    data.requirements[0].title+='（外部修改）';
-    const bytes=JSON.stringify(data);await fs.writeFile(file,bytes);
-    modified.push({file,bytes,id:data.requirements[0].id,title:data.requirements[0].title});
-  }
-  assert.equal((await traceability(root,'calculator.suite')).index.state,'stale');
-  result=await buildTraceabilityIndex(root,'calculator.suite',{python});
-  assert.equal(result.index.state,'current',result.index.error);
-  const {needs,entities}=await readNeedsIndex(root);
-  const compute=entities.find(entity=>entity.symbol==='computeAverage');
-  assert.equal(compute.path,'server/average.mjs');
-  const spec=Object.values(needs).find(need=>need.type==='spec'&&need.node_id==='avg-compute');
-  assert.ok(compute.needIds.includes(spec.id));
-  assert.deepEqual(spec.fulfills,['REQ_AVERAGE_COMPUTE']);
-  assert.deepEqual(needs.TEST_AVG_20.verifies,['REQ_AVERAGE_ALL.AVG_20','REQ_AVERAGE_COMPUTE.AVG_DIVIDE']);
-  assert.deepEqual(needs.REQ_AVERAGE_COMPUTE.parts.AVG_DIVIDE.verifies_back,['TEST_AVG_20']);
-  for(const changed of modified) {
-    assert.equal(needs[changed.id].title,changed.title);
-    assert.equal(result.requirements.find(r=>r.id===changed.id).title,changed.title);
-    assert.equal(await fs.readFile(changed.file,'utf8'),changed.bytes);
-  }
 });
