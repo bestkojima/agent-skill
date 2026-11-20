@@ -17,9 +17,9 @@ test('重要性仅接受三个等级，旧节点缺省普通，显式非法值�
 test('等级保存读取与 JSON 往返一致；需求确认和执行绑定不变；非法值不落盘', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'studio-importance-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
-  for (const dir of ['contracts', 'src', 'server', 'tests']) await fs.mkdir(path.join(root, dir));
-  const graphFile = path.join(root, 'contracts/feedback.json');
-  const requirementFile = path.join(root, 'contracts/requirements.json');
+  for (const dir of ['project/calculator', 'contracts', 'src', 'server', 'tests']) await fs.mkdir(path.join(root,dir),{recursive:true});
+  const graphFile = path.join(root, 'project/calculator/graph.json');
+  const requirementFile = path.join(root, 'project/calculator/requirements.json');
   const requirements = JSON.stringify({ version: 1, featureId: 'demo', requirements: [{
     id: 'REQ_ONE', nodeId: 'one', title: '已确认需求', description: '保持原意', status: 'confirmed', revision: 1,
     confirmedText: { title: '已确认需求', description: '保持原意' }, confirmedAt: '2026-11-13T00:00:00Z'
@@ -38,7 +38,7 @@ test('等级保存读取与 JSON 往返一致；需求确认和执行绑定不�
     assert.equal(view.projectGraph.nodes[0].importance, importance);
     assert.equal(JSON.parse(await fs.readFile(graphFile, 'utf8')).nodes[0].importance, importance);
     assert.equal((await traceability(root)).projectGraph.nodes[0].importance, importance);
-    assert.match(await fs.readFile(path.join(root, 'traceability/requirements.rst'), 'utf8'), new RegExp(`:importance: ${importance}`));
+    assert.match(await fs.readFile(path.join(root, 'traceability/python-calculator-view.rst'), 'utf8'), new RegExp(`:importance: ${importance}`));
     assert.equal(view.projectGraph.nodes[0].capabilityId, 'average.calculate');
     assert.equal(view.requirements[0].status, 'confirmed');
     assert.equal(await fs.readFile(requirementFile, 'utf8'), requirements);

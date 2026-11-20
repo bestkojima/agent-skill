@@ -5,6 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { nodeContext } from '../server/node-context.mjs';
 import { runCapabilityTests, listCapabilities } from '../server/capabilities.mjs';
+import { featureRegistry } from '../server/feature-registry.mjs';
+
+featureRegistry.capabilities.push({id:'fixture.execute',rootNodeId:'submit',nodeIds:['submit','form','validate','lookup','save','view'],runPath:'/api/fixture',testPath:'/api/fixture/test',frontend:{entry:'fixture',feature:'fixture',component:'FixturePanel',path:'features/fixture/client.tsx',mode:'fixture'},testFiles:['tests/fixture.test.mjs']});
 
 const node = (id,parentId=null,extra={}) => ({id,parentId,title:`标题 ${id}`,kind:'logic',description:`职责 ${id}`,input:`输入 ${id}`,output:`输出 ${id}`,processing:`处理 ${id}`,acceptance:`验收 ${id}`,errors:['无效输入'],position:{x:0,y:0},...extra});
 async function fixture(t) {
@@ -13,10 +16,10 @@ async function fixture(t) {
     assert.equal(path.dirname(root),path.resolve(os.tmpdir()));
     await fs.rm(root,{recursive:true,force:true});
   });
-  for (const dir of ['contracts','src','server','tests']) await fs.mkdir(path.join(root,dir));
+  for (const dir of ['project/calculator', 'contracts','src','server','tests']) await fs.mkdir(path.join(root,dir),{recursive:true});
   const graph = {version:2,feature:{id:'demo',title:'独立契约',goal:'读取节点上下文'},nodes:[
     node('root',null,{kind:'group'}),node('input','root',{importance:'key'}),
-    node('submit','root',{kind:'group',importance:'core',capabilityId:'feedback.submit'}),node('result','root'),
+    node('submit','root',{kind:'group',importance:'core',capabilityId:'fixture.execute'}),node('result','root'),
     node('validate','submit'),node('save','submit'),node('nested','validate'),node('unrelated')
   ],edges:[
     {id:'incoming',source:'input',target:'submit',sourceHandle:'ok',targetHandle:'in',label:'有效输入'},
@@ -24,19 +27,19 @@ async function fixture(t) {
     {id:'internal',source:'validate',target:'save',sourceHandle:'ok',targetHandle:'in',label:'校验通过'},
     {id:'unrelated',source:'unrelated',target:'result',sourceHandle:'ok',targetHandle:'in',label:'无关分支'}
   ]};
-  const requirement = {id:'REQ_FEEDBACK_SUBMIT',nodeId:'submit',nodeIds:['submit'],title:'已保存的需求',description:'需求保持项目保存内容',status:'confirmed',revision:2,
+  const requirement = {id:'REQ_FIXTURE_SUBMIT',nodeId:'submit',nodeIds:['submit'],title:'已保存的需求',description:'需求保持项目保存内容',status:'confirmed',revision:2,
     confirmedText:{title:'已保存的需求',description:'需求保持项目保存内容'},
     acceptance:[{id:'AC_OK',input:'有效输入',expected:'成功结果',observable:'页面结果'}],acceptanceStatus:'draft'};
-  await fs.writeFile(path.join(root,'contracts/feedback.json'),JSON.stringify(graph));
-  await fs.writeFile(path.join(root,'contracts/requirements.json'),JSON.stringify({version:1,featureId:'demo',requirements:[requirement]}));
-  await fs.writeFile(path.join(root,'src/demo.ts'),'// @need-ids: REQ_FEEDBACK_SUBMIT\nexport const value = 1;\n');
-  await fs.writeFile(path.join(root,'tests/domain.test.mjs'),"// @need-ids: REQ_FEEDBACK_SUBMIT\nimport test from 'node:test';import assert from 'node:assert/strict';test('fixture behaviour',()=>assert.equal(1+1,2));\n");
+  await fs.writeFile(path.join(root,'project/calculator/graph.json'),JSON.stringify(graph));
+  await fs.writeFile(path.join(root,'project/calculator/requirements.json'),JSON.stringify({version:1,featureId:'demo',requirements:[requirement]}));
+  await fs.writeFile(path.join(root,'src/demo.ts'),'// @need-ids: REQ_FIXTURE_SUBMIT\nexport const value = 1;\n');
+  await fs.writeFile(path.join(root,'tests/fixture.test.mjs'),"// @need-ids: REQ_FIXTURE_SUBMIT\nimport test from 'node:test';import assert from 'node:assert/strict';test('fixture behaviour',()=>assert.equal(1+1,2));\n");
   return {root,graph};
 }
 
 test('saved context supplies one bounded contract for UI, documents and Agent without writes',async t=>{
   const {root} = await fixture(t);
-  const before = await fs.readFile(path.join(root,'contracts/feedback.json'),'utf8');
+  const before = await fs.readFile(path.join(root,'project/calculator/graph.json'),'utf8');
   const {context,markdown,taskMarkdown} = await nodeContext({featureId:'demo',nodeId:'submit'},root);
   assert.deepEqual(context.provenance,{graph:'saved',requirements:'saved',semanticChanges:false,evidenceContractChanges:false});
   assert.equal(context.node.importance,'core');
@@ -49,19 +52,19 @@ test('saved context supplies one bounded contract for UI, documents and Agent wi
   assert.equal(context.requirements[0].status,'confirmed');
   assert.equal(context.requirements[0].acceptanceStatus,'draft');
   assert.deepEqual(context.code,[{path:'src/demo.ts',line:1}]);
-  assert.deepEqual(context.tests,[{path:'tests/domain.test.mjs',line:1}]);
-  assert.equal(context.capability.id,'feedback.submit');
-  assert.equal(context.frontend.component,'FeedbackPreview');
+  assert.deepEqual(context.tests,[{path:'tests/fixture.test.mjs',line:1}]);
+  assert.equal(context.capability.id,'fixture.execute');
+  assert.equal(context.frontend.component,'FixturePanel');
   assert.equal(context.evidence.state,'not-run');
-  assert.ok(context.gaps.some(gap=>gap.code==='requirement.REQ_FEEDBACK_SUBMIT.acceptance-confirmation'));
+  assert.ok(context.gaps.some(gap=>gap.code==='requirement.REQ_FIXTURE_SUBMIT.acceptance-confirmation'));
   assert.match(markdown,/核心逻辑 \(core\)/);
   assert.match(markdown,/input · 标题 input \[ok\] → submit · 标题 submit \[in\]/);
-  assert.match(markdown,/REQ_FEEDBACK_SUBMIT · 已保存的需求/);
+  assert.match(markdown,/REQ_FIXTURE_SUBMIT · 已保存的需求/);
   assert.match(markdown,/src\/demo.ts:1/);
   assert.doesNotMatch(markdown,/标题 nested|标题 unrelated|无关分支/);
   assert.ok(taskMarkdown.includes(markdown));
   assert.match(taskMarkdown,/本次任务授权/);
-  assert.equal(await fs.readFile(path.join(root,'contracts/feedback.json'),'utf8'),before);
+  assert.equal(await fs.readFile(path.join(root,'project/calculator/graph.json'),'utf8'),before);
   await assert.rejects(fs.stat(path.join(root,'traceability')),error=>error.code==='ENOENT');
 });
 
@@ -80,12 +83,12 @@ test('draft preview updates node and dependency documents while requirements and
   assert.match(markdown,/草稿输入依赖输出/);
   assert.match(markdown,/草稿失败条件/);
   assert.match(markdown,/尚未覆盖这份草稿/);
-  assert.equal(await fs.readFile(path.join(root,'contracts/feedback.json'),'utf8'),original);
+  assert.equal(await fs.readFile(path.join(root,'project/calculator/graph.json'),'utf8'),original);
 });
 
 test('saved test evidence remains current for layout and importance, but never covers a semantic draft',async t=>{
   const {root,graph} = await fixture(t);
-  const report = await runCapabilityTests('feedback.submit',root);
+  const report = await runCapabilityTests('fixture.execute',root);
   assert.equal(report.state,'passed',report.output);
   graph.nodes.find(item=>item.id==='submit').importance='normal';
   graph.nodes.find(item=>item.id==='submit').position.x=200;
@@ -123,7 +126,7 @@ test('unbound nodes expose actual gaps; an explicit unknown capability does not 
 test('acceptance has one source: linked requirement criteria or node instructions suffice',async t=>{
   const {root,graph}=await fixture(t);
   graph.nodes.find(item=>item.id==='submit').acceptance='';
-  const file=path.join(root,'contracts/requirements.json');
+  const file=path.join(root,'project/calculator/requirements.json');
   const data=JSON.parse(await fs.readFile(file,'utf8'));
   data.requirements[0].acceptanceStatus='confirmed';
   data.requirements[0].confirmedAcceptance=structuredClone(data.requirements[0].acceptance);

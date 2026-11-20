@@ -1,7 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import feedback from '../features/feedback/server.mjs';
 
 const projectRoot=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 
@@ -46,7 +45,7 @@ const calculatorProject = {
   publishedTests:{path:'project/calculator/_build/test-results.json',directory:'project/calculator/'},
   draftKeys:{graph:'python-calculator-view',base:'python-calculator-base',pending:'python-calculator-pending',requirements:'python-calculator-reqs'},
 };
-export const featureRegistry=createFeatureRegistry([{features:[calculatorProject]},feedback]);
+export const featureRegistry=createFeatureRegistry([{features:[calculatorProject]}]);
 
 export async function featureCatalog(root=projectRoot) {
   const {openTraceability}=await import('./traceability.mjs');

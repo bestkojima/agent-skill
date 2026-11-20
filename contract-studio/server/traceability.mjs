@@ -140,7 +140,7 @@ function rstText(data, graph, feature = featureConfig()) {
   return lines.join('\n');
 }
 
-export async function exportNeeds(root = projectRoot, featureId = 'feedback.submit') {
+export async function exportNeeds(root = projectRoot, featureId) {
   const feature = featureConfig(featureId);
   const data = await combinedRequirements(root, feature);
   const graph = await loadGraph(root, data.featureId, feature);
@@ -157,7 +157,7 @@ async function exportBuildSources(root, featureId) {
     : [...(featureConfig(featureId).requirementSources??[]),featureId];
   for(const id of selected) {
     const feature = featureConfig(id);
-    // Legacy projects/fixtures may contain just the original feedback pair.
+    // Standalone fixtures may only contain their own source pair.
     // Explicit rebuilding never asks them to create unrelated example files.
     let present=true;
     for(const file of [feature.requirementFile,feature.graphFile]) {

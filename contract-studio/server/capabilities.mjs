@@ -46,7 +46,7 @@ async function candidate(root, cap, project) {
   const binding=project.capabilities().find(item=>item.id===cap.id);
   const relevant = new Set([...cap.testFiles,'server/api.mjs','server/capabilities.mjs','scripts/test-case-reporter.mjs',
     ...await filesUnder(root,'src'), ...await filesUnder(root,'features'), ...binding.implementation.map(ref=>ref.path),
-    ...await filesUnder(root,'server').then(files=>files.filter(file=>!file.startsWith('server/adapters/')))]);
+    ...await filesUnder(root,'server')]);
   const files = [];
   for (const file of [...relevant].sort()) {
     try { const stat=await fs.stat(path.join(root,file)); files.push({path:file,size:stat.size,mtimeMs:stat.mtimeMs}); }

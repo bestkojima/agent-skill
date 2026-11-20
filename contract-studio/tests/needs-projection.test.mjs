@@ -17,6 +17,7 @@ const python=path.join(project,process.platform==='win32'?'.venv/Scripts/python.
 const integration={skip:!existsSync(python)&&'先运行 uv sync --locked 启用真实 Sphinx 集成测试'};
 const readJson=async(root,file)=>JSON.parse(await fs.readFile(path.join(root,file),'utf8'));
 const feature={...featureRegistry.defaultTrace,id:'demo'};
+featureRegistry.capabilities.push({id:'fixture.execute',rootNodeId:'submit',nodeIds:['submit','form','validate','lookup','save','view'],runPath:'/api/fixture',testPath:'/api/fixture/test',frontend:{entry:'fixture',feature:'fixture',component:'FixturePanel',path:'features/fixture/client.tsx',mode:'fixture'},testFiles:['tests/fixture.test.mjs']});
 const stockCode='// @need-ids: SPEC_STOCK_CHECK\nexport function reserveStock(quantity, requested) { return quantity - requested; }\n';
 
 test('独立图读取保留传入描述符的文件与 ID，无需登记、需求文件或 Sphinx',async t=>{
@@ -32,17 +33,17 @@ test('独立图读取保留传入描述符的文件与 ID，无需登记、需�
 async function fixture(t) {
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'studio-projection-'));
   t.after(()=>fs.rm(root,{recursive:true,force:true}));
-  for(const dir of ['contracts','project/calculator','src','features','server','tests','traceability',...['cpp','python','go','rust','csharp'].map(name=>`server/adapters/impl/${name}`)])await fs.mkdir(path.join(root,dir),{recursive:true});
+  for(const dir of ['project/calculator', 'contracts','project/calculator','src','features','server','tests','traceability',...['cpp','python','go','rust','csharp'].map(name=>`server/adapters/impl/${name}`)])await fs.mkdir(path.join(root,dir),{recursive:true});
   // Saves use the established project interpreter path; share it without copying dependencies.
   await fs.symlink(path.join(project,'.venv'),path.join(root,'.venv'),process.platform==='win32'?'junction':'dir');
-  await fs.writeFile(path.join(root,'contracts/requirements.json'),JSON.stringify({version:1,featureId:'demo',requirements:[{id:'REQ_LEGACY',nodeId:'one',title:'既有入口',description:'保留原有功能入口。',status:'draft',revision:1}]}));
-  await fs.writeFile(path.join(root,'contracts/feedback.json'),JSON.stringify({version:2,feature:{id:'demo',title:'存量功能视图',goal:'增加库存预留'},nodes:[
+  await fs.writeFile(path.join(root,'project/calculator/requirements.json'),JSON.stringify({version:1,featureId:'demo',requirements:[{id:'REQ_LEGACY',nodeId:'one',title:'既有入口',description:'保留原有功能入口。',status:'draft',revision:1}]}));
+  await fs.writeFile(path.join(root,'project/calculator/graph.json'),JSON.stringify({version:2,feature:{id:'demo',title:'存量功能视图',goal:'增加库存预留'},nodes:[
     {id:'one',title:'入口',input:'请求',output:'任务',parentId:null,position:{x:0,y:0}},
     {id:'two',title:'原有存储',input:'记录',output:'结果',parentId:'one',position:{x:300,y:0}},
   ],edges:[]}));
   for(const file of ['conf.py','ubproject.toml','node-mapping.json'])await fs.copyFile(path.join(project,'traceability',file),path.join(root,'traceability',file));
   await fs.appendFile(path.join(root,'traceability/conf.py'),"\nsuppress_warnings = ['codelinks.git_root']\n");
-  await fs.writeFile(path.join(root,'traceability/index.rst'),'Inventory fixture\n=================\n\n.. toctree::\n\n   requirements\n   warehouse\n   node-properties\n\n.. src-trace::\n   :project: backend\n\n.. src-trace::\n   :project: tests\n');
+  await fs.writeFile(path.join(root,'traceability/index.rst'),'Inventory fixture\n=================\n\n.. toctree::\n\n   python-calculator-view\n   warehouse\n   node-properties\n\n.. src-trace::\n   :project: backend\n\n.. src-trace::\n   :project: tests\n');
   await fs.writeFile(path.join(root,'traceability/warehouse.rst'),[
     'Warehouse rules','===============','','保留这段领域说明。','',
     '.. req:: 库存预留不得产生负库存','   :id: REQ_STOCK_RESERVE','','   预留数量不能超过可用库存。','',
@@ -95,8 +96,8 @@ test('陌生领域的需求、节点属性、函数和原生测试由规则投�
   assert.deepEqual(linkedTest.relatedFunctionIds,[fn.id]);
   assert.equal(linkedTest.verifies[0].needId,'REQ_STOCK_RESERVE.AC_RESERVE');
   assert.deepEqual(result.backend.requirements.find(item=>item.id===requirement.id).acceptance[0].testCaseIds,['TEST_STOCK_RESERVE']);
-  assert.deepEqual((await readJson(root,'contracts/feedback.json')).nodes.map(node=>node.id),['one','two']);
-  assert.equal((await readJson(root,'contracts/requirements.json')).requirements.some(item=>item.id==='REQ_STOCK_RESERVE'),false);
+  assert.deepEqual((await readJson(root,'project/calculator/graph.json')).nodes.map(node=>node.id),['one','two']);
+  assert.equal((await readJson(root,'project/calculator/requirements.json')).requirements.some(item=>item.id==='REQ_STOCK_RESERVE'),false);
   assert.equal(JSON.stringify(featureRegistry.features),registry);
   const source=await featureSource('SPEC_STOCK_CHECK',new URL('http://localhost/'),root);
   assert.equal(source.symbol,'reserveStock');assert.equal(source.startLine,2);
@@ -117,7 +118,7 @@ test('原生节点属性写回 RST，布局单独保存，移动函数后重建�
     const node=graph.nodes.find(node=>node.id==='SPEC_STOCK_CHECK');node.position={x:777,y:333};node.size={width:320,height:180};
   });
   assert.equal(await fs.readFile(path.join(root,'traceability/warehouse.rst'),'utf8'),document);
-  const persisted=await readJson(root,'contracts/feedback.json');
+  const persisted=await readJson(root,'project/calculator/graph.json');
   assert.equal(persisted.nodes.some(node=>node.id==='SPEC_STOCK_CHECK'),false);
   assert.deepEqual(persisted._needsLayout.SPEC_STOCK_CHECK,{needId:'SPEC_STOCK_CHECK',position:{x:777,y:333},size:{width:320,height:180}});
   node=(await readProjectedGraph(root,feature)).nodes.find(node=>node.id==='SPEC_STOCK_CHECK');
@@ -132,7 +133,7 @@ test('原生节点属性写回 RST，布局单独保存，移动函数后重建�
 
 test('原生需求确认和修改回写原文，原有 JSON 需求保持独立',integration,async t=>{
   const {root,result}=await fixture(t);
-  const original=await fs.readFile(path.join(root,'contracts/requirements.json'),'utf8');
+  const original=await fs.readFile(path.join(root,'project/calculator/requirements.json'),'utf8');
   let requirement=result.requirements.find(item=>item.id==='REQ_STOCK_RESERVE');
   assert.equal(requirement.description,'预留数量不能超过可用库存。');
   assert.deepEqual(requirement.acceptance,[{id:'AC_RESERVE',input:'',expected:'库存为 8，预留 3 后剩余 5。'}]);
@@ -155,7 +156,7 @@ test('原生需求确认和修改回写原文，原有 JSON 需求保持独立',
   const document=await fs.readFile(path.join(root,'traceability/warehouse.rst'),'utf8');
   assert.match(document,/\.\. req:: 库存预留与缺货提示/);assert.match(document,/库存不足时返回缺货原因/);
   assert.match(document,/:need_part:`\(AC_RESERVE\)/);assert.match(document,/尾部说明必须保留/);
-  assert.equal(await fs.readFile(path.join(root,'contracts/requirements.json'),'utf8'),original);
+  assert.equal(await fs.readFile(path.join(root,'project/calculator/requirements.json'),'utf8'),original);
 });
 
 test('JSON 与原生 RST 节点可跨来源重排父子和出边，再删除原生叶节点',integration,async t=>{
@@ -185,9 +186,9 @@ test('JSON 与原生 RST 节点可跨来源重排父子和出边，再删除原�
 
 test('公共读取 Interface 统一识别旧 RST：图、能力、源码和草稿都使用同一过期状态',integration,async t=>{
   const {root}=await fixture(t);
-  const graph=await readJson(root,'contracts/feedback.json');
+  const graph=await readJson(root,'project/calculator/graph.json');
   graph.nodes[0].title='尚未导出的新名称';
-  await fs.writeFile(path.join(root,'contracts/feedback.json'),JSON.stringify(graph));
+  await fs.writeFile(path.join(root,'project/calculator/graph.json'),JSON.stringify(graph));
   // Simulate an external Sphinx-only build that did not export the newer JSON.
   assert.equal((await buildNeedsIndex(root,{python})).state,'current');
   const project=await openTraceability(root);
@@ -218,7 +219,7 @@ test('项目定制字段与关系在公共 Interface 同时贯通属性、函数
     '[needs.links.satisfies]', 'outgoing = "satisfies"', 'incoming = "satisfied by"', '',
   ].join('\n'));
   const document=path.join(root,'traceability/warehouse.rst');
-  await fs.writeFile(document,(await fs.readFile(document,'utf8')).replaceAll(':node_properties:',':contract_fields:').replaceAll(':fulfills:',':satisfies:').replace('"warehouse":"east-1"','"warehouse":"east-1","capabilityId":"feedback.submit"'));
+  await fs.writeFile(document,(await fs.readFile(document,'utf8')).replaceAll(':node_properties:',':contract_fields:').replaceAll(':fulfills:',':satisfies:').replace('"warehouse":"east-1"','"warehouse":"east-1","capabilityId":"fixture.execute"'));
   const built=await buildTraceabilityIndex(root,undefined,{python});
   assert.equal(built.index.state,'current',built.index.error);
   const project=await openTraceability(root),view=await project.feature('demo');
@@ -226,7 +227,7 @@ test('项目定制字段与关系在公共 Interface 同时贯通属性、函数
   assert.equal(node.warehouse,'east-1');
   assert.equal(view.backend.nodes.find(node=>node.nodeId==='SPEC_STOCK_CHECK').requirementIds[0],'REQ_STOCK_RESERVE');
   assert.equal(view.backend.functions.find(fn=>fn.symbol==='reserveStock').nodeIds[0],node.id);
-  const cap=project.capabilities().find(cap=>cap.id==='feedback.submit');
+  const cap=project.capabilities().find(cap=>cap.id==='fixture.execute');
   assert.ok(cap.nodeIds.includes(node.id));assert.ok(cap.requirementIds.includes('REQ_STOCK_RESERVE'));
   assert.equal(cap.implementation[0].symbol,'reserveStock');assert.equal(cap.testCases[0].id,'TEST_STOCK_RESERVE');
   const contract=project.capabilityContract(cap.id);

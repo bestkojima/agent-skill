@@ -6,6 +6,9 @@ import path from 'node:path';
 import { listCapabilities, capabilityEvidence, runCapabilityTests } from '../server/capabilities.mjs';
 import { sourceRevision } from '../server/needs-index.mjs';
 import { indexedTestCases } from '../server/indexed-tests.mjs';
+import { featureRegistry } from '../server/feature-registry.mjs';
+
+featureRegistry.capabilities.push({id:'fixture.execute',rootNodeId:'submit',nodeIds:['submit'],runPath:'/api/fixture',testPath:'/api/fixture/test',frontend:{component:'FixturePanel',path:'features/fixture/client.tsx'},testFiles:['tests/fixture.test.mjs']});
 
 async function writeFixtureIndex(root,needs,entities) {
   const dir=path.join(root,'traceability/_build/needs');
@@ -28,33 +31,33 @@ test('真实固定测试报告持久化；行为变化过期，布局与重要�
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'studio-evidence-'));
   t.after(()=>fs.rm(root,{recursive:true,force:true}));
   for(const dir of ['tests','contracts','server'])await fs.mkdir(path.join(root,dir));
-  for(const file of listCapabilities().find(cap=>cap.id==='feedback.submit').testFiles){
+  for(const file of listCapabilities().find(cap=>cap.id==='fixture.execute').testFiles){
     await fs.writeFile(path.join(root,file),"import test from 'node:test';import assert from 'node:assert/strict';test('real assertion',()=>assert.equal(210/20,10.5));\n");
   }
   const graph={nodes:[{id:'submit',title:'反馈',input:'数字',position:{x:1,y:1}}],edges:[]};
-  const graphFile=path.join(root,'contracts','feedback.json');await fs.writeFile(graphFile,JSON.stringify(graph));
-  assert.equal((await capabilityEvidence('feedback.submit',root)).state,'not-run');
-  const report=await runCapabilityTests('feedback.submit',root);
+  const graphFile=path.join(root,'contracts','fixture.json');await fs.writeFile(graphFile,JSON.stringify(graph));
+  assert.equal((await capabilityEvidence('fixture.execute',root)).state,'not-run');
+  const report=await runCapabilityTests('fixture.execute',root);
   assert.equal(report.state,'passed',report.output);assert.equal(report.passed,1);assert.equal(report.failed,0);
   assert.deepEqual(report.cases,[],'a legacy project without a Needs index does not invent case associations');
   assert.equal(report.caseIndex.state,'unconfigured');
   assert.equal(report.caseCoverage.state,'unindexed');assert.equal(report.executionState,'passed');
   assert.ok(report.completedAt);assert.ok(report.output.includes('real assertion'));
-  assert.equal((await capabilityEvidence('feedback.submit',root)).state,'passed');
+  assert.equal((await capabilityEvidence('fixture.execute',root)).state,'passed');
   graph.nodes[0].position.x=9;await fs.writeFile(graphFile,JSON.stringify(graph));
-  assert.equal((await capabilityEvidence('feedback.submit',root)).state,'passed');
+  assert.equal((await capabilityEvidence('fixture.execute',root)).state,'passed');
   for(const importance of ['core','key','normal',undefined]) {
     graph.nodes[0].importance=importance;await fs.writeFile(graphFile,JSON.stringify(graph));
-    assert.equal((await capabilityEvidence('feedback.submit',root)).state,'passed',`importance=${importance}`);
+    assert.equal((await capabilityEvidence('fixture.execute',root)).state,'passed',`importance=${importance}`);
   }
   graph.nodes[0].input='修改后的输入约束';await fs.writeFile(graphFile,JSON.stringify(graph));
-  assert.equal((await capabilityEvidence('feedback.submit',root)).state,'stale');
-  await fs.writeFile(path.join(root,'tests/domain.test.mjs'),"import test from 'node:test';test('actual failure',()=>{throw Error('failure evidence')});\n");
-  const failure=await runCapabilityTests('feedback.submit',root);
+  assert.equal((await capabilityEvidence('fixture.execute',root)).state,'stale');
+  await fs.writeFile(path.join(root,'tests/fixture.test.mjs'),"import test from 'node:test';test('actual failure',()=>{throw Error('failure evidence')});\n");
+  const failure=await runCapabilityTests('fixture.execute',root);
   assert.equal(failure.state,'failed');assert.equal(failure.failed,1);assert.notEqual(failure.exitCode,0);
   await fs.mkdir(path.join(root,'features/demo'),{recursive:true});
   await fs.writeFile(path.join(root,'features/demo/client.tsx'),'export function Feature(){return null;}\n');
-  assert.equal((await capabilityEvidence('feedback.submit',root)).state,'stale','feature modules are part of the inspected candidate');
+  assert.equal((await capabilityEvidence('fixture.execute',root)).state,'stale','feature modules are part of the inspected candidate');
   await assert.rejects(runCapabilityTests('../untrusted',root),/未知/);
 });
 
@@ -62,12 +65,12 @@ test('逐用例证据从索引读取并匹配文件和稳定 ID，保留失败�
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'studio-cases-'));
   t.after(()=>fs.rm(root,{recursive:true,force:true}));
   await fs.mkdir(path.join(root,'tests'));
-  const cap=listCapabilities().find(item=>item.id==='feedback.submit');
+  const cap=listCapabilities().find(item=>item.id==='fixture.execute');
   const needs={REQ_DEMO:{id:'REQ_DEMO',type:'req',title:'Dynamic requirement',parts:{AC_ONE:{id:'AC_ONE'}}}};
   const entities=[];
   for(const [id,title] of [['TEST_PASS','pass'],['TEST_FAIL','fail'],['TEST_SKIP','skip'],['TEST_MISSING','missing']]) {
     needs[id]={id,title,type:'test',verifies:['REQ_DEMO.AC_ONE']};
-    entities.push({path:'tests/domain.test.mjs',needIds:[id],markerLines:[1],indexState:'current'});
+    entities.push({path:'tests/fixture.test.mjs',needIds:[id],markerLines:[1],indexState:'current'});
   }
   const [passed,failed,skipped,missing]=indexedTestCases(needs,entities);
   const testLine=(item,body='()=>{}',options='')=>`test(${JSON.stringify(`[${item.id}] runtime title can differ`)},${options}${body});\n`;
@@ -121,16 +124,16 @@ test('测试关联变更按当前声明投影；旧文件、删除条目和旧 v
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'studio-case-binding-'));
   t.after(()=>fs.rm(root,{recursive:true,force:true}));
   await fs.mkdir(path.join(root,'tests'));
-  const cap=listCapabilities().find(item=>item.id==='feedback.submit');
+  const cap=listCapabilities().find(item=>item.id==='fixture.execute');
   const header="import test from 'node:test';\n";
   for(const file of cap.testFiles)await fs.writeFile(path.join(root,file),header);
-  await fs.appendFile(path.join(root,'tests/domain.test.mjs'),"test('[TEST_ONE] one',()=>{});\n");
+  await fs.appendFile(path.join(root,'tests/fixture.test.mjs'),"test('[TEST_ONE] one',()=>{});\n");
   const needs={
     REQ_ONE:{id:'REQ_ONE',type:'req',parts:{AC_ONE:{id:'AC_ONE'},AC_TWO:{id:'AC_TWO'}}},
     SPEC_ONE:{id:'SPEC_ONE',type:'spec',node_id:'submit',fulfills:['REQ_ONE']},
     TEST_ONE:{id:'TEST_ONE',type:'test',title:'one',verifies:['REQ_ONE.AC_ONE']},
   };
-  const entities=[{path:'tests/domain.test.mjs',needIds:['TEST_ONE'],markerLines:[1]}];
+  const entities=[{path:'tests/fixture.test.mjs',needIds:['TEST_ONE'],markerLines:[1]}];
   await writeFixtureIndex(root,needs,entities);
   const report=await runCapabilityTests(cap.id,root);
   assert.equal(report.state,'passed');assert.equal(report.cases[0].state,'passed');
@@ -157,7 +160,7 @@ test('已配置但缺失或失败的索引不产生通过的关联证据，真�
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'studio-case-index-'));
   t.after(()=>fs.rm(root,{recursive:true,force:true}));
   for(const dir of ['tests','traceability'])await fs.mkdir(path.join(root,dir));
-  const cap=listCapabilities().find(item=>item.id==='feedback.submit');
+  const cap=listCapabilities().find(item=>item.id==='fixture.execute');
   for(const file of cap.testFiles)await fs.writeFile(path.join(root,file),"import test from 'node:test';test('real assertion',()=>{});\n");
   await fs.writeFile(path.join(root,'traceability/conf.py'),'# Missing build\n');
   const missing=await runCapabilityTests(cap.id,root);
@@ -166,8 +169,8 @@ test('已配置但缺失或失败的索引不产生通过的关联证据，真�
   assert.equal((await capabilityEvidence(cap.id,root)).state,'stale','a repeat read cannot turn a missing index green');
 
   const needs={REQ_ONE:{id:'REQ_ONE',type:'req',parts:{AC_ONE:{id:'AC_ONE'}}},TEST_ONE:{id:'TEST_ONE',type:'test',verifies:['REQ_ONE.AC_ONE']}};
-  const entities=[{path:'tests/domain.test.mjs',needIds:['TEST_ONE'],markerLines:[1]}];
-  await fs.writeFile(path.join(root,'tests/domain.test.mjs'),"import test from 'node:test';test('[TEST_ONE] real assertion',()=>{});\n");
+  const entities=[{path:'tests/fixture.test.mjs',needIds:['TEST_ONE'],markerLines:[1]}];
+  await fs.writeFile(path.join(root,'tests/fixture.test.mjs'),"import test from 'node:test';test('[TEST_ONE] real assertion',()=>{});\n");
   await writeFixtureIndex(root,needs,entities);
   const stateFile=path.join(root,'traceability/_build/needs/index-state.json');
   const state=JSON.parse(await fs.readFile(stateFile,'utf8'));

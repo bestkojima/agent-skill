@@ -454,7 +454,16 @@ function Studio({feature,catalog,client,onFeatureChange,openRequest}:{feature:Fe
   const graphStatus=!graphReady?'正在读取项目图…':traceError?'无法读取项目图，浏览器草稿仍可编辑':!graphCompatible?'画布功能与项目图不匹配':graphConflict?'项目图已变更，本地草稿未覆盖':!graphBase?'浏览器草稿缺少项目基线':graphDirty?'浏览器草稿 · 未保存到项目':'已与项目图同步';
   return <div className="studio-shell">
     <header className="topbar"><div className="brand"><div className="brand-symbol">◇</div><div><strong>Contract Studio</strong><span>让功能可见，让实现可验</span></div></div>{!readOnly&&<div className="top-actions"><button onClick={()=>void saveGraph()} disabled={!!draftReadError||!graphReady||graphBusy||!!traceError||!graphCompatible||!graphBase||graphConflict||!graphDirty} className="save-project">{graphBusy?'处理中…':'保存到项目'}</button><button onClick={exportGraph}>导出 JSON</button><button onClick={()=>fileRef.current?.click()} disabled={!graphReady}>导入</button><button onClick={()=>{if(draftReadError&&!window.confirm('重置会替换被拒绝的草稿，请先导出需要保留的原稿。继续吗？'))return;setDraftReadError('');setFocusId(null);setGraph(clone(original));setSelectedId(defaultSelected);setCollapsed(initialCollapsed());setTrace([]);setFitVersion(n=>n+1)}} disabled={!graphReady}>重置画布</button><input hidden type="file" ref={fileRef} accept=".json,application/json" onChange={e=>{void importGraph(e.target.files?.[0]);e.target.value=''}}/></div>}</header>
-    <div className="subheader"><div className="example-switcher"><label htmlFor="studio-example">功能工作区</label><select id="studio-example" value={example} onChange={e=>onFeatureChange(e.target.value)}>{visibleFeatures(catalog,example).map(item=><option key={item.alias} value={item.alias}>{item.title}</option>)}</select></div><span className="sub-caption">需求 · 功能图 · 实现与测试</span></div>
+    <div className="subheader">
+      {catalog.features.length === 1 ? <b>{feature.title}</b> :
+        <div className="example-switcher">
+          <label htmlFor="studio-example">功能工作区</label>
+          <select id="studio-example" value={example} onChange={e=>onFeatureChange(e.target.value)}>
+            {visibleFeatures(catalog,example).map(item=><option key={item.alias} value={item.alias}>{item.title}</option>)}
+          </select>
+        </div>}
+      <span className="sub-caption">需求 · 功能图 · 实现与测试</span>
+    </div>
     <div className="workspace">
       <section className={`canvas with-feature-panel ${focus?'is-focused':''}`}>
         <div className="canvas-header"><strong>功能流程</strong><span>{readOnly?'点击节点查看需求、代码和报告':'点击编辑节点；在功能组内添加子节点'}</span><button onClick={()=>toggle(rootId)}>{collapsed.has(rootId)?'展开全部':'折叠功能'}</button></div>

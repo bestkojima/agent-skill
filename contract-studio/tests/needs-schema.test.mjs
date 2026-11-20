@@ -25,7 +25,7 @@ const rawNeeds=()=>({
     contract_fields:JSON.stringify({input:'库存和预留数量',output:'剩余库存',threshold:5,reservation:{allowPartial:false}}),
     satisfies:['REQ_RESERVE'],substeps:['SPEC_RECORD'],after:['SPEC_RECORD']},
   SPEC_RECORD:{id:'SPEC_RECORD',type:'spec',title:'保存记录',content:'从已有 JSON 导出的节点',docname:'requirements',lineno:20,
-    contract_source:'contracts/feedback.json',feature_id:'warehouse',node_id:'record',fulfills:['REQ_RESERVE'],parent_spec:['SPEC_RESERVE'],
+    contract_source:'contracts/example.json',feature_id:'warehouse',node_id:'record',fulfills:['REQ_RESERVE'],parent_spec:['SPEC_RESERVE'],
     node_properties:JSON.stringify({input:'剩余库存',output:'预留记录',capabilityId:cap.id})},
   IMPL_RESERVE:{id:'IMPL_RESERVE',type:'impl',implements:['SPEC_RESERVE'],docname:'code',lineno:1},
   TEST_RESERVE:{id:'TEST_RESERVE',type:'test',title:'库存预留验收',verifies:['REQ_RESERVE.AC_RESERVE'],docname:'tests',lineno:2}
@@ -55,7 +55,7 @@ test('one normalization makes custom rules agree across nodes, requirements, fun
   assert.equal(binding.testCases[0].id,'TEST_RESERVE');assert.equal(binding.testCases[0].verifies[0].state,'linked');
   assert.deepEqual(needs.REQ_RESERVE,raw.REQ_RESERVE);assert.deepEqual(needs.IMPL_RESERVE,raw.IMPL_RESERVE);assert.deepEqual(needs.TEST_RESERVE,raw.TEST_RESERVE);
   assert.equal(needs.SPEC_RESERVE.docname,'warehouse');assert.equal(needs.SPEC_RESERVE.lineno,11);
-  assert.equal(needs.SPEC_RECORD.contract_source,'contracts/feedback.json');
+  assert.equal(needs.SPEC_RECORD.contract_source,'contracts/example.json');
   assert.deepEqual(raw,original);
   assert.deepEqual(normalizeNeeds(needs,customRules),needs);
 });
@@ -108,7 +108,7 @@ test('custom type selection excludes unselected authored specs across projection
 
 test('generated source snapshots never leak layout into behavior, while authored descriptions remain semantic',()=>{
   const generated=(x,importance,description)=>({SPEC_GENERATED:{id:'SPEC_GENERATED',type:'spec',title:'旧节点',feature_id:'warehouse',node_id:'generated',
-    contract_source:'contracts/feedback.json',importance,
+    contract_source:'contracts/example.json',importance,
     content:`功能节点原始字段::\n\n   ${JSON.stringify({id:'generated',position:{x,y:0},importance})}`,
     node_properties:JSON.stringify({input:'请求',output:'结果',importance,...(description===undefined?{}:{description})})}});
   const first=generated(0,'key'),second=generated(500,'normal');

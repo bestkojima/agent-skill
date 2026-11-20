@@ -4,14 +4,14 @@ import { graphFocus } from '../src/graph-focus.mjs';
 import { resolveFeature, visibleFeatures, capabilityDestination } from '../src/feature-navigation.mjs';
 
 const feature=(alias,entry)=>({id:`${alias}.feature`,alias,frontend:{entry}});
-const catalog={defaultFeature:'suite',features:[feature('suite','calculator'),feature('feedback','feedback'),feature('sum','calculator'),feature('new-feature','new-ui')]};
+const catalog={defaultFeature:'suite',features:[feature('suite','calculator'),feature('other','other'),feature('detail','calculator'),feature('new-feature','new-ui')]};
 test('工作区导航按登记目录解析旧入口与新增功能，能力跳转不内置模式表',()=>{
-  assert.equal(resolveFeature(catalog,'sum',null).alias,'sum');
-  assert.equal(resolveFeature(catalog,'sum.feature',null).alias,'sum');
-  assert.equal(resolveFeature(catalog,null,'sum').alias,'suite');
-  assert.equal(resolveFeature(catalog,null,'feedback').alias,'feedback');
+  assert.equal(resolveFeature(catalog,'detail',null).alias,'detail');
+  assert.equal(resolveFeature(catalog,'detail.feature',null).alias,'detail');
+  assert.equal(resolveFeature(catalog,null,'detail').alias,'suite');
+  assert.equal(resolveFeature(catalog,null,'other').alias,'other');
   assert.equal(resolveFeature(catalog,'new-feature',null).frontend.entry,'new-ui');
-  assert.deepEqual(visibleFeatures(catalog,'sum').map(item=>item.alias),['suite','feedback','sum','new-feature']);
+  assert.deepEqual(visibleFeatures(catalog,'detail').map(item=>item.alias),['suite','other','detail','new-feature']);
   const capability={frontend:{entry:'new-ui',feature:'new-feature',mode:'future-mode'}};
   assert.equal(capabilityDestination(catalog,capability).alias,'new-feature');
   assert.equal(capabilityDestination(catalog,{frontend:{entry:'missing',feature:'untrusted'}}),undefined);
