@@ -1,0 +1,2 @@
+# Let ubCode resolve the shared configuration when opening calculator source.
+path = "../../traceability"

@@ -8,11 +8,14 @@
   },
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "build": "tsc --noEmit && vite build",
+    "build": "npm run typecheck && vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "test": "node --test tests/*.test.mjs",
-    "check": "node scripts/check-contract.mjs",
-    "verify": "npm test && npm run check"
+    "test": "tsx scripts/run-tests.ts",
+    "check": "tsx scripts/check-contract.ts",
+    "verify": "npm test && npm run check",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json",
+    "index:build": "tsx scripts/build-index.ts",
+    "index:export": "tsx scripts/export-needs.ts"
   },
   "dependencies": {
     "@xyflow/react": "^12.8.4",
@@ -24,6 +27,7 @@
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",
+    "tsx": "4.23.15",
     "typescript": "^5.7.3",
     "vite": "^6.0.7"
   }

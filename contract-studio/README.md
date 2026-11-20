@@ -7,13 +7,13 @@ contract-studio/
 ├─ project/calculator/     独立的 Python / Tkinter 计算器
 │  ├─ app.py               桌面窗口
 │  ├─ calculator.py        运算规则和步骤
-│  ├─ requirements.rst     需求、规格和验收条件
-│  ├─ graph.json           节点布局；需求和规格只维护 RST
+│  ├─ graph.json           节点布局
 │  ├─ tests/               计算器的验收测试
 │  └─ run_tests.py         运行测试并发布报告
 ├─ src/                    工作台的 React / React Flow 界面
 ├─ server/                 只读项目视图、追踪查询和报告读取
-├─ traceability/           Sphinx-Needs / CodeLinks 配置与生成索引
+├─ traceability/           Sphinx 文档目录、配置和生成索引
+│  └─ python-calculator.rst 计算器需求、节点规格和验收条件
 ├─ scripts/                索引与功能图检查
 └─ tests/                  工作台自身的 Node.js 测试
 ```
@@ -31,12 +31,12 @@ uv run --no-project --python 3.12 python project/calculator/run_tests.py
 
 ## 启动工作台
 
-需要 Node.js 20.19+ 和 uv。
+需要 Node.js 20.19+ 和 uv。工作台用 TypeScript：React 组件是 .tsx，服务端、脚本和测试是 .ts。
 
 ```powershell
 npm install
 uv sync --locked --python 3.12
-node scripts/build-index.mjs
+npm run index:build
 npm run dev -- --host 127.0.0.1
 ```
 
@@ -48,8 +48,8 @@ npm run dev -- --host 127.0.0.1
 
 - `GET /api/features`：读取可用视图。此分支只提供独立计算器的图。
 - `GET /api/node-context?feature=suite&nodeId=SPEC_PYCALC_AVERAGE`：读取节点属性、需求、函数和用例状态。
-- `node scripts/build-index.mjs`：源码或需求发生变化后，重新生成索引。
-- 计算器节点规格在 `project/calculator/requirements.rst`；画布布局在 `project/calculator/graph.json`。这个视图在工作台中只读。
+- `npm run index:build`：源码或需求发生变化后，重新生成索引。
+- 计算器需求与节点规格在 [`traceability/python-calculator.rst`](traceability/python-calculator.rst)，由 `traceability/index.rst` 的 `toctree` 纳入。画布布局在 `project/calculator/graph.json`；规格直接改 RST。
 
 [本仓库 Skill](.agents/skills/contract-studio/SKILL.md) · [通用节点契约](docs/design/skill-workbench.md) · [历史验证记录](docs/skill-evaluation.md)
 
@@ -57,7 +57,9 @@ npm run dev -- --host 127.0.0.1
 
 用 `req` 声明需求、`need_part` 给验收项编号。用 `spec.fulfills` 把规格连到需求；在函数前加 `@need-ids: 规格ID`，CodeLinks 会定位具体函数。测试用 `@need test` 声明 ID，再用 `:verifies: 需求ID.验收项ID, 规格ID` 同时声明验收项和它直接验证的节点。项目报告中的同一个测试 ID 用来回填运行结果。
 
-例：`REQ_PYCALC_AVERAGE.TWENTY` 对应 `TEST_PYCALC_AVG20`。规格 `SPEC_PYCALC_AVERAGE` 的实现是 `_average`。无需另写关系表。Sphinx 生成的 `traceability/_build/needs/` 及项目测试报告都不提交；ubCode 编辑器可独立使用，工作台未直接接入它。
+例：`REQ_PYCALC_AVERAGE.TWENTY` 对应 `TEST_PYCALC_AVG20`，规格 `SPEC_PYCALC_AVERAGE` 的实现是 `_average`。无需另写关系表。
+
+在 VS Code 打开 `traceability/python-calculator.rst` 可使用同目录的 ubCode 配置；打开计算器源码时由项目目录中的 `ubproject.redirect.toml` 找到同一份配置。先构建索引，再在 ubCode 的 Needs Index 中查看。工作台直接读取 Sphinx / CodeLinks 输出；生成索引和本机测试报告都不提交。
 
 ## 验证
 

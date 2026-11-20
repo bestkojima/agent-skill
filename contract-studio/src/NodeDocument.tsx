@@ -23,8 +23,8 @@ export function NodeDocument({featureId,graph,nodeId,dirty,sourceVersion}:{featu
     const url=URL.createObjectURL(new Blob([task?current.response.taskMarkdown:current.response.markdown],{type:'text/markdown;charset=utf-8'}));
     const link=document.createElement('a');link.href=url;link.download=`${nodeId}${task?'.codex-task':''}.md`;link.click();URL.revokeObjectURL(url);
   };
-  return <div className="inspector-body"><p className="micro">{dirty?'当前画布草稿预览 · 需求来自已保存项目':'项目节点上下文'} · 文档与开发任务共享同一份上下文。</p>
+  return <div className="inspector-body">{dirty&&<p className="micro">画布为草稿，需求来自项目文件。</p>}
     <div className="document-actions"><button className="primary-button" disabled={!current?.response} onClick={()=>download()}>导出节点说明</button><button className="primary-button secondary" disabled={!current?.response} onClick={()=>download(true)}>导出 Codex 开发任务</button></div>
-    {current?.error?<div className="notice notice-error" role="alert">上下文读取失败：{current.error} <button className="link-button" onClick={()=>setRetry(value=>value+1)}>重试</button></div>:current?.response?<pre className="node-document">{current.response.markdown}</pre>:<div className="empty" role="status">正在生成当前节点上下文…</div>}
+    {current?.error?<div className="notice notice-error" role="alert">无法读取文档：{current.error} <button className="link-button" onClick={()=>setRetry(value=>value+1)}>重试</button></div>:current?.response?<pre className="node-document">{current.response.markdown}</pre>:<div className="empty" role="status">正在加载文档…</div>}
   </div>;
 }

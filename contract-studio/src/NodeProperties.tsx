@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { importanceLabels, nodeImportance, type Importance } from './node-importance.mjs';
+import { importanceLabels, nodeImportance, type Importance } from './node-importance.ts';
 
 export type PropertyNode = {
   id:string; title:string; parentId:string|null; kind:'group'|'ui'|'logic'|'async'|'action'; importance?:Importance;

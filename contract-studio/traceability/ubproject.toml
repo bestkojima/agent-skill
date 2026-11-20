@@ -64,6 +64,10 @@ incoming = "declared caller"
 outgoing = "verifies"
 incoming = "verified by"
 
+[needs_json]
+path = "_build/needs/needs.json"
+src = "."
+
 [codelinks]
 set_local_url = true
 

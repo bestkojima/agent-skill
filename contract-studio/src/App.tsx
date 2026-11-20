@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ReactFlow, ReactFlowProvider, Background, Controls, Handle, MarkerType, Position, BaseEdge, EdgeLabelRenderer, getSmoothStepPath,
   type Node as FlowNode, type NodeProps, type Edge, type Connection,
@@ -8,14 +8,17 @@ import '@xyflow/react/dist/style.css';
 import { api, ApiError } from './api';
 import type { Kind, Spec, Graph, Step, Run } from './workbench-types';
 import { featureClients, type FeatureDefinition, type FeatureCatalog, type FeatureClient, type OpenFeatureRequest } from './feature-client';
-import { graphFocus } from './graph-focus.mjs';
+import { graphFocus } from './graph-focus.ts';
 import { NodeDocument } from './NodeDocument';
-import { resolveFeature, visibleFeatures, capabilityDestination } from './feature-navigation.mjs';
+import { resolveFeature, visibleFeatures, capabilityDestination } from './feature-navigation.ts';
 import { NodeProperties } from './NodeProperties';
 import { CapabilityPanel, type Capability } from './CapabilityPanel';
-import { PublishedTests } from './PublishedTests';
+import { PublishedEvidence } from './PublishedTests';
 import { TraceReference, useSourceEditor, type TraceRef } from './TraceReference';
-import { importanceLabels, importanceLabel, nodeImportance } from './node-importance.mjs';
+import { importanceLabels, importanceLabel, nodeImportance } from './node-importance.ts';
+import { KeepNodeInView } from './KeepNodeInView';
+import { FunctionTree } from './FunctionTree';
+import { ChainTestDraft } from './ChainTestDraft';
 
 type Acceptance={id:string;input:string;expected:string;observable?:string};
 type Requirement={id:string;nodeId:string;nodeIds?:string[];title:string;description:string;status:'draft'|'confirmed';revision:number;code:TraceRef[];tests:TraceRef[];acceptance?:Acceptance[];acceptanceStatus?:'draft'|'confirmed'};
@@ -52,10 +55,10 @@ function NodeCard({data}:NodeProps<DisplayNode>){
   const badge=<span className={`importance-badge importance-${importance}`} title={`${labelFor(spec.kind)} · ${importanceLabel(importance)}`}>{importanceLabel(importance)}</span>;
   if(spec.kind==='group' && hasChildren && !collapsed){
     return <div className={`group-heading importance-${importance} ${isNestedGroup?'nested-group-heading':''}`}>
-      {isNestedGroup&&<Handle id="in" type="target" position={Position.Left} className="flow-handle"/>}
-      <span className="group-identity"><span className="group-name">{spec.title}</span>{badge}{requirementLabel&&<span className={`group-requirement ${!hasUnsavedRequirement&&requirement?.status==='confirmed'?'confirmed':''}`}>{requirementLabel}</span>}{isNestedGroup&&run&&<span className={`group-run ${run}`}>{runLabel}</span>}</span>
+      <span className="group-identity"><span className="group-node-disc"><span className="group-name">{spec.title}</span>
+        {isNestedGroup&&<><Handle id="in" type="target" position={Position.Left} className="flow-handle"/><Handle id="ok" type="source" position={Position.Right} style={{top:'36%'}} className="flow-handle"/><Handle id="fail" type="source" position={Position.Right} style={{top:'76%',background:'#c27d56'}} className="flow-handle"/></>}
+      </span>{badge}{requirementLabel&&<span className={`group-requirement ${!hasUnsavedRequirement&&requirement?.status==='confirmed'?'confirmed':''}`}>{requirementLabel}</span>}{isNestedGroup&&run&&<span className={`group-run ${run}`}>{runLabel}</span>}</span>
       <span className="node-actions">{!data.readOnly&&<button className="node-add nodrag" aria-label={`在${spec.title}中添加节点`} onClick={e=>{e.stopPropagation();addChild(spec.id)}}>＋ 添加</button>}<button className="node-toggle nodrag" aria-expanded="true" onClick={(e)=>{e.stopPropagation();toggle(spec.id)}}>折叠 −</button></span>
-      {isNestedGroup&&<><Handle id="ok" type="source" position={Position.Right} style={{top:'36%'}} className="flow-handle"/><Handle id="fail" type="source" position={Position.Right} style={{top:'76%',background:'#c27d56'}} className="flow-handle"/></>}
     </div>;
   }
   return <div className={`node-card node-${spec.kind} importance-${importance} ${run==='rejected'?'node-failed':''} ${run==='ok'?'node-passed':''}`}>
@@ -64,8 +67,8 @@ function NodeCard({data}:NodeProps<DisplayNode>){
     <div className="node-name">{spec.title}</div>{requirementLabel&&<div className={`node-requirement ${!hasUnsavedRequirement&&requirement?.status==='confirmed'?'confirmed':''}`}>{requirementLabel}</div>}{annotation&&<div className="node-runtime">{annotation}</div>}
     {hasChildren&&<button className="node-toggle nodrag" aria-expanded="false" onClick={(e)=>{e.stopPropagation();toggle(spec.id)}}>展开子节点 +</button>}
     {!data.readOnly&&spec.kind==='group'&&<button className="node-add nodrag" aria-label={`在${spec.title}中添加节点`} onClick={e=>{e.stopPropagation();addChild(spec.id)}}>＋ 添加</button>}
-    <Handle id="ok" type="source" position={Position.Right} style={{top:'36%'}} className="flow-handle"/>
-    <Handle id="fail" type="source" position={Position.Right} style={{top:'76%',background:'#c27d56'}} className="flow-handle"/>
+    <Handle id="ok" type="source" position={Position.Right} style={{top:'36%',right:'2%'}} className="flow-handle"/>
+    <Handle id="fail" type="source" position={Position.Right} style={{top:'76%',right:'7.3%',background:'#c27d56'}} className="flow-handle"/>
   </div>;
 }
 const nodeTypes={contract:NodeCard};
@@ -77,6 +80,10 @@ function BranchEdge({id,sourceX,sourceY,targetX,targetY,sourcePosition,targetPos
   return <><BaseEdge id={id} path={path} style={style} markerEnd={markerEnd}/>{label&&<EdgeLabelRenderer><div className="branch-label" style={{transform:`translate(-50%, -50%) translate(${labelX}px, ${captionY}px)`}}>{label}</div></EdgeLabelRenderer>}</>;
 }
 const edgeTypes={branch:BranchEdge};
+
+function CloseDrawer({label,onClose}:{label:string;onClose:()=>void}){
+  return <button type="button" className="drawer-close" aria-label={label} title={label} onClick={onClose}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg></button>;
+}
 
 function Fit({value,focusId}:{value:number;focusId:string|null}){
   const flow=useReactFlow();
@@ -115,11 +122,11 @@ function RequirementPanel({node,compatible,requirement,draft,traceability,loadin
   const [busy,setBusy]=useState(false);
   const [formError,setFormError]=useState('');
   const [editor,changeEditor]=useSourceEditor();
-  if(loading)return <div className="empty">正在读取需求与代码关联…</div>;
+  if(loading)return <div className="empty">正在读取需求…</div>;
   if(error)return <div className="trace-unavailable"><div className="notice notice-error">无法读取需求关联：{error}</div><button className="link-button" onClick={onRefresh}>重新读取</button></div>;
   if(!traceability)return <div className="empty">尚未读取需求关联。</div>;
   if(!compatible)return <div className="empty">当前画布属于其他功能，项目需求不会按同名节点自动关联。</div>;
-  if(!requirement)return readOnly?<div className="empty">此节点没有关联需求。</div>:<CreateRequirement key={node.id} node={node} onCreate={onCreate}/>;
+  if(!requirement)return readOnly?<div className="empty">没有关联需求。</div>:<CreateRequirement key={node.id} node={node} onCreate={onCreate}/>;
   const title=draft?.title??requirement.title;
   const description=draft?.description??requirement.description;
   const acceptance=draft?.acceptance??requirement.acceptance??[];
@@ -131,12 +138,9 @@ function RequirementPanel({node,compatible,requirement,draft,traceability,loadin
     setBusy(true);setFormError('');
     try{await onSave(requirement,title,description,action,acceptance,confirmAcceptance)}catch(e){setFormError(String(e))}finally{setBusy(false)}
   };
-  const links=(label:string,refs:TraceRef[])=><div className="trace-links"><div className="trace-links-heading">{label} <span>{refs.length}</span></div>{refs.length?refs.map((ref,i)=><TraceReference key={`${ref.path}:${ref.line}:${i}`} reference={ref} editor={editor} onEditorChange={changeEditor}/>):<div className="trace-missing">尚未发现关联标记</div>}</div>;
+  const links=(label:string,refs:TraceRef[])=><div className="trace-links"><div className="trace-links-heading">{label} <span>{refs.length}</span></div>{refs.length?refs.map((ref,i)=><TraceReference key={`${ref.path}:${ref.line}:${i}`} reference={ref} editor={editor} onEditorChange={changeEditor}/>):<div className="trace-missing">无源码引用</div>}</div>;
   return <div className="requirements-body">
     <div className="requirement-meta"><span className="requirement-id">{requirement.id}</span><span className={`requirement-status ${!changed&&requirement.status==='confirmed'?'confirmed':'draft'}`}>{changed?'有未保存修改':requirement.status==='confirmed'?'已确认':'草稿 · 待确认'}</span></div>
-    <div className="trace-section-title">关联证据 <span>{traceability.index?.source==='sphinx-needs+codelinks'?'Sphinx-Needs / CodeLinks':'本地标记索引'}</span></div>
-    {links('实现代码',requirement.code)}{links('相关测试',requirement.tests)}
-    <p className="micro">列出的是发现的源码标记，不表示测试已经运行或验证通过。</p>
     {readOnly?<><h3>{requirement.title}</h3><p>{requirement.description}</p>
       <ul>{acceptance.map(item=><li key={item.id}><code>{item.id}</code> · {[item.input,item.expected,item.observable].filter(Boolean).join('；')}</li>)}</ul>
     </>:<>
@@ -146,9 +150,13 @@ function RequirementPanel({node,compatible,requirement,draft,traceability,loadin
     {acceptance.map((item,index)=><fieldset className="acceptance-item" key={index}><legend>条件 {index+1}</legend>{(['id','input','expected','observable'] as const).map(field=><div className="field" key={field}><label>{({id:'条件 ID',input:'输入',expected:'预期结果',observable:'可观察行为'} as const)[field]}<input aria-label={`条件${index+1}${field}`} value={item[field]??''} onChange={event=>editAcceptance(acceptance.map((entry,i)=>i===index?{...entry,[field]:event.target.value}:entry))}/></label></div>)}<button className="link-button danger-link" onClick={()=>editAcceptance(acceptance.filter((_,i)=>i!==index))}>移除此条件</button></fieldset>)}
     <div className="requirement-actions"><button className="link-button" onClick={addAcceptance}>＋ 添加验收条件</button><button onClick={()=>void save('save',true)} disabled={busy||!acceptance.length||acceptance.some(item=>!item.id.trim()||!item.input.trim()||!item.expected.trim())||(!acceptanceChanged&&requirement.acceptanceStatus==='confirmed')}>确认验收条件</button></div>
     <div className="requirement-actions"><button onClick={()=>void save('save')} disabled={busy||(!changed&&!acceptanceChanged)||!title.trim()||!description.trim()}>保存草稿</button><button className="primary-button" onClick={()=>void save('confirm')} disabled={busy||(!changed&&requirement.status==='confirmed')||!title.trim()||!description.trim()}>{busy?'保存中…':'确认这条需求'}</button>{(changed||acceptanceChanged)&&<button className="link-button" onClick={()=>onDiscard(requirement.id)} disabled={busy}>放弃修改</button>}</div>
-    <p className="micro">确认记录当前文字；修改后需重新确认。画布修改先保存在浏览器，需手动保存到项目；业务代码不会自动改写。</p>
+    <p className="micro">需求修改后需重新确认，不会改动业务代码。</p>
     {formError&&<div className="notice notice-error" role="alert">{formError} <button className="link-button" onClick={onRefresh}>重新读取</button></div>}</>}
-    <div className="trace-source">需求文件：{traceability.source} · RST 源文件：{traceability.sphinx.state==='current'?'已同步':traceability.sphinx.state==='outdated'?'待同步':'缺失'}</div>
+    <details className="evidence-more">
+      <summary>源码引用（{requirement.code.length+requirement.tests.length}）</summary>
+      {links('实现代码',requirement.code)}{links('相关测试',requirement.tests)}
+    </details>
+    <div className="trace-source">需求文件：{traceability.source}{traceability.sphinx.state!=='current'&&` · RST ${traceability.sphinx.state==='outdated'?'待同步':'缺失'}`}</div>
   </div>;
 }
 
@@ -217,15 +225,23 @@ function Studio({feature,catalog,client,onFeatureChange,openRequest}:{feature:Fe
   };
   const initialCollapsed=()=>new Set<string>(client.initialCollapsed?.(feature)??[]);
   const [collapsed,setCollapsed]=useState<Set<string>>(initialCollapsed);
-  const [tab,setTab]=useState<'property'|'document'|'requirement'|'test'|'code'|'trace'>(readOnly?'requirement':'property');
+  const [tab,setTab]=useState<'overview'|'property'|'document'|'requirement'|'test'|'code'|'trace'>(readOnly?'overview':'property');
   const [importanceView,setImportanceView]=useState(false);
   const [focusId,setFocusId]=useState<string|null>(null);
+  const [otherSelected,setOtherSelected]=useState<string[]>([]);
   const [activeRequirementId,setActiveRequirementId]=useState('');
   const [linkRequirementId,setLinkRequirementId]=useState('');
   const [creatingRequirement,setCreatingRequirement]=useState(false);
   const [linkBusy,setLinkBusy]=useState(false);
   const [linkError,setLinkError]=useState('');
   const [panelOpen,setPanelOpen]=useState(false);
+  const [nodeListOpen,setNodeListOpen]=useState(false);
+  const [treeReveal,setTreeReveal]=useState(0);
+  const [inspectorVisited,setInspectorVisited]=useState(false);
+  const listToggle=useRef<HTMLButtonElement>(null);
+  const listDrawer=useRef<HTMLElement>(null);
+  const detailDrawer=useRef<HTMLElement>(null);
+  const detailTrigger=useRef<HTMLElement|null>(null);
   const [fixture,setFixture]=useState('');
   const [mode,setMode]=useState<'mock'|'dry-run'|'sandbox'>('dry-run');
   const [nodeResult,setNodeResult]=useState<Run|null>(null);
@@ -241,14 +257,40 @@ function Studio({feature,catalog,client,onFeatureChange,openRequest}:{feature:Fe
   const selectedRequirement=selectedRequirements.find(requirement=>requirement.id===activeRequirementId)??selectedRequirements[0];
   const selectedCapability=selected?.capabilityId?capabilities.find(capability=>capability.id===selected.capabilityId):capabilities.find(capability=>capability.nodeIds.includes(selectedId));
   const degree={in:graph.edges.filter(x=>x.target===selectedId).length,out:graph.edges.filter(x=>x.source===selectedId).length};
+  const selectedNeighbors=useMemo(()=>graph.edges.flatMap(edge=>edge.source===selectedId?[edge.target]:edge.target===selectedId?[edge.source]:[]),[graph.edges,selectedId]);
   useEffect(()=>{if(!draftReadError)localStorage.setItem(JSON_KEY,JSON.stringify(graph))},[graph,draftReadError]);
   useEffect(()=>{if(draftReadError)return;if(graphBase)localStorage.setItem(GRAPH_BASE_KEY,JSON.stringify(graphBase));else localStorage.removeItem(GRAPH_BASE_KEY)},[graphBase,draftReadError]);
   useEffect(()=>{localStorage.setItem(REQUIREMENT_DRAFT_KEY,JSON.stringify(requirementDrafts))},[requirementDrafts]);
   useEffect(()=>{setGraphMessage(null)},[graph]);
   useEffect(()=>{setFixture(JSON.stringify(selected?.fixture??{},null,2));setNodeResult(null);setError('');setSource(null);setActiveRequirementId('');setCreatingRequirement(false);setLinkRequirementId('');setLinkError('')},[selectedId]);
-  useEffect(()=>{if(!panelOpen)return;const close=(event:KeyboardEvent)=>{if(event.key==='Escape'&&!(event.target instanceof HTMLInputElement)&&!(event.target instanceof HTMLTextAreaElement))setPanelOpen(false)};window.addEventListener('keydown',close);return()=>window.removeEventListener('keydown',close)},[panelOpen]);
+  useLayoutEffect(()=>{
+    if(listDrawer.current)listDrawer.current.inert=!nodeListOpen;
+    if(detailDrawer.current)detailDrawer.current.inert=!panelOpen;
+  },[nodeListOpen,panelOpen]);
+  const closeList=useCallback(()=>{
+    if(listDrawer.current?.contains(document.activeElement))listToggle.current?.focus({preventScroll:true});
+    setNodeListOpen(false);
+  },[]);
+  const closeDetails=useCallback(()=>{
+    if(detailDrawer.current?.contains(document.activeElement)){
+      const trigger=detailTrigger.current;
+      (trigger?.isConnected&&!trigger.closest('[inert]')?trigger:listToggle.current)?.focus({preventScroll:true});
+    }
+    setPanelOpen(false);
+  },[]);
   useEffect(()=>{
-    if(tab!=='code'||!selected)return;
+    if(!panelOpen&&!nodeListOpen)return;
+    const close=(event:KeyboardEvent)=>{
+      if(event.key!=='Escape'||event.defaultPrevented||event.target instanceof HTMLInputElement||event.target instanceof HTMLTextAreaElement||event.target instanceof HTMLSelectElement)return;
+      if(nodeListOpen&&event.target instanceof Node&&listDrawer.current?.contains(event.target))closeList();
+      else if(panelOpen)closeDetails();
+      else closeList();
+    };
+    window.addEventListener('keydown',close);
+    return()=>window.removeEventListener('keydown',close);
+  },[panelOpen,nodeListOpen,closeDetails,closeList]);
+  useEffect(()=>{
+    if(readOnly||tab!=='code'||!selected)return;
     let live=true;
     const custom=client.sourcePath?.(selected,runtimeOptions);
     const ref=selectedRequirement?.code[0];
@@ -256,11 +298,11 @@ function Studio({feature,catalog,client,onFeatureChange,openRequest}:{feature:Fe
     if(!path){setSource(null);return}
     void api<{path?:string;file?:string;symbol?:string;excerpt:string}>(path).then(data=>{if(live)setSource({file:data.path??data.file??'',symbol:data.symbol??selected.id,excerpt:data.excerpt})}).catch(()=>{if(live)setSource(null)});
     return()=>{live=false};
-  },[selectedId,tab,runtimeOptions,client,selectedRequirement]);
+  },[selectedId,tab,runtimeOptions,client,selectedRequirement,readOnly]);
   const toggle=useCallback((id:string)=>{setCollapsed(old=>{const next=new Set(old);if(next.has(id))next.delete(id);else next.add(id);return next})},[]);
   const byId=useMemo(()=>new Map(graph.nodes.map(n=>[n.id,n])),[graph.nodes]);
   const focus=useMemo(()=>focusId?graphFocus(graph,focusId):null,[graph,focusId]);
-  const toggleNode=useCallback((id:string)=>{if(focusId)setFocusId(id);else toggle(id);setSelectedId(id)},[toggle,focusId]);
+  const toggleNode=useCallback((id:string)=>{if(focusId)setFocusId(id);else toggle(id);setSelectedId(id);setOtherSelected([])},[toggle,focusId]);
   const hidden=useCallback((n:Spec)=>{let p=n.parentId;const walked=new Set<string>();while(p&&!walked.has(p)){if(collapsed.has(p))return true;walked.add(p);p=byId.get(p)?.parentId??null}return false},[collapsed,byId]);
   const statuses=useMemo(()=>Object.fromEntries(trace.map(t=>[t.nodeId,t.status])),[trace]);
   const derivedNodes=useMemo(()=>new Set(trace.filter(step=>step.derived).map(step=>step.nodeId)),[trace]);
@@ -284,6 +326,11 @@ function Studio({feature,catalog,client,onFeatureChange,openRequest}:{feature:Fe
     return active;
   },[graph.edges,trace,byId]);
   const layout=useMemo(()=>client.layout?.(graph,collapsed,original)??{offsets:new Map(),sizes:new Map()},[client,graph,collapsed,original]);
+  const selectedOnCanvas=useMemo(()=>new Set([selectedId,...otherSelected].filter(id=>{
+    const node=byId.get(id);
+    return node&&(focus?focus.ids.has(id):!hidden(node));
+  })),[selectedId,otherSelected,byId,focus,hidden]);
+  const chainSelected=selectedOnCanvas.size>1;
   const addChild=useCallback((parentId:string)=>{
     if(!graphReady)return;
     const id=`step-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,6)}`;
@@ -291,32 +338,33 @@ function Studio({feature,catalog,client,onFeatureChange,openRequest}:{feature:Fe
       const parent=g.nodes.find(n=>n.id===parentId);
       if(!parent||parent.kind!=='group')return g;
       const children=g.nodes.filter(n=>n.parentId===parentId);
-      const y=Math.max(80,...children.map(n=>n.position.y+(n.size?.height??120)+28));
+      const y=Math.max(94,...children.map(n=>n.position.y+Math.max(n.size?.height??0,148)+28));
       const node:Spec={id,parentId,title:'新功能节点',kind:'logic',importance:'normal',description:'',position:{x:35,y},input:'待填写',output:'待填写',processing:'',acceptance:'',errors:[],fixture:{},code:'',test:''};
-      const size={width:Math.max(parent.size?.width??0,970),height:Math.max(parent.size?.height??0,y+160)};
+      const size={width:Math.max(parent.size?.width??0,970),height:Math.max(parent.size?.height??0,y+166)};
       return {...g,nodes:[...g.nodes.map(n=>n.id===parentId?{...n,size}:n),node]};
     });
     setCollapsed(old=>{const next=new Set(old);next.delete(parentId);return next});
-    setSelectedId(id);setFocusId(id);setPanelOpen(true);setTab('property');setFitVersion(n=>n+1);
+    setSelectedId(id);setOtherSelected([]);setFocusId(null);setPanelOpen(true);setInspectorVisited(true);setTab('property');setFitVersion(n=>n+1);
   },[graphReady]);
   const flowNodes=useMemo<DisplayNode[]>(()=>[...graph.nodes].sort((a,b)=>{const depth=(node:Spec)=>{let value=0,p=node.parentId;const seen=new Set<string>();while(p&&!seen.has(p)){seen.add(p);value++;p=byId.get(p)?.parentId??null}return value};return depth(a)-depth(b)}).map(n=>{
     const hasChildren=graph.nodes.some(x=>x.parentId===n.id);
     const folded=hasChildren&&collapsed.has(n.id);
     const displacement=layout.offsets.get(n.id);
     const projected=focus?.positions.get(n.id);
+    const groupSize=!focus&&hasChildren&&!folded?(layout.sizes.get(n.id)??n.size??{width:970,height:415}):undefined;
     return {id:n.id,type:'contract',parentId:focus?undefined:n.parentId??undefined,position:projected??(displacement?{x:n.position.x-displacement.x,y:n.position.y-displacement.y}:n.position),
-      style:{width:focus?232:!folded&&layout.sizes.has(n.id)?layout.sizes.get(n.id)!.width:hasChildren&&!folded?(n.size?.width??970):n.kind==='group'?230:176,height:focus?130:!folded&&layout.sizes.has(n.id)?layout.sizes.get(n.id)!.height:hasChildren&&!folded?(n.size?.height??415):n.kind==='group'?120:116},
-      hidden:focus?!focus.ids.has(n.id):hidden(n),selected:n.id===selectedId,
+      style:groupSize??{width:148,height:148},
+      hidden:focus?!focus.ids.has(n.id):hidden(n),selected:selectedOnCanvas.has(n.id),
       className:importanceView?(nodeImportance(n.importance)==='normal'?'importance-muted':'importance-emphasis'):undefined,
       data:{spec:n,readOnly,hasChildren,collapsed:focus?hasChildren:folded,run:statuses[n.id],derived:derivedNodes.has(n.id),requirement:compatible&&!traceError&&!traceLoading?traceability?.requirements.find(r=>(r.nodeIds??[r.nodeId]).includes(n.id)):undefined,hasUnsavedRequirement:compatible&&!!traceability?.requirements.some(r=>(r.nodeIds??[r.nodeId]).includes(n.id)&&!!requirementDrafts[r.id]&&(requirementDrafts[r.id].title!==r.title||requirementDrafts[r.id].description!==r.description||!sameValue(requirementDrafts[r.id].acceptance??r.acceptance??[],r.acceptance??[]))),traceAvailable:compatible&&!traceError&&!traceLoading,toggle:toggleNode,addChild,annotation:client.nodeAnnotation?.(n,runtimeOptions)},
     };
-  }),[graph.nodes,byId,collapsed,hidden,selectedId,statuses,derivedNodes,toggleNode,addChild,client,runtimeOptions,traceability,requirementDrafts,compatible,traceError,traceLoading,layout,focus,importanceView]);
+  }),[graph.nodes,byId,collapsed,hidden,selectedOnCanvas,statuses,derivedNodes,toggleNode,addChild,client,runtimeOptions,traceability,requirementDrafts,compatible,traceError,traceLoading,layout,focus,importanceView,readOnly]);
   const flowEdges=useMemo<Edge[]>(()=>graph.edges.map(e=>({
     ...e,id:e.id,sourceHandle:e.sourceHandle??'ok',targetHandle:e.targetHandle??'in',type:'branch',
     hidden:focus?!(focus.ids.has(e.source)&&focus.ids.has(e.target)):hidden(byId.get(e.source)!)||hidden(byId.get(e.target)!),
-    animated:activeEdges.has(e.id),style:{stroke:activeEdges.get(e.id)==='rejected'?'#c45f40':activeEdges.has(e.id)?'#178367':'#94a3b8',strokeWidth:activeEdges.has(e.id)?2.5:1.5},
+    animated:activeEdges.has(e.id),style:{stroke:activeEdges.get(e.id)==='rejected'?'#c45f40':activeEdges.has(e.id)?'#178367':chainSelected&&selectedOnCanvas.has(e.source)&&selectedOnCanvas.has(e.target)?'#1a6884':'#94a3b8',strokeWidth:activeEdges.has(e.id)||chainSelected&&selectedOnCanvas.has(e.source)&&selectedOnCanvas.has(e.target)?2.5:1.5},
     markerEnd:{type:MarkerType.ArrowClosed,color:'#94a3b8',width:16,height:16}
-  })),[graph.edges,byId,hidden,activeEdges,focus]);
+  })),[graph.edges,byId,hidden,activeEdges,focus,chainSelected,selectedOnCanvas]);
   const onNodesChange=useCallback((changes:NodeChange<DisplayNode>[])=>{
     if(focusId)return;
     setGraph(g=>{let updated=g.nodes;for(const c of changes){if(c.type==='position'&&c.position){updated=updated.map(n=>{if(n.id!==c.id)return n;const delta=layout.offsets.get(n.id);return {...n,position:delta?{x:c.position!.x+delta.x,y:c.position!.y+delta.y}:c.position!}})}}return updated===g.nodes?g:{...g,nodes:updated}});
@@ -336,7 +384,7 @@ function Studio({feature,catalog,client,onFeatureChange,openRequest}:{feature:Fe
     const removed=new Set([selectedId]);let changed=true;
     while(changed){changed=false;for(const node of graph.nodes)if(node.parentId&&removed.has(node.parentId)&&!removed.has(node.id)){removed.add(node.id);changed=true}}
     if(removed.size>1&&!window.confirm(`删除「${selected?.title}」和它的 ${removed.size-1} 个子节点？此操作先修改浏览器草稿。`))return;
-    setGraph(g=>({...g,nodes:g.nodes.filter(n=>!removed.has(n.id)),edges:g.edges.filter(e=>!removed.has(e.source)&&!removed.has(e.target))}));setSelectedId(rootId);if(focusId&&removed.has(focusId))setFocusId(null);
+    setGraph(g=>({...g,nodes:g.nodes.filter(n=>!removed.has(n.id)),edges:g.edges.filter(e=>!removed.has(e.source)&&!removed.has(e.target))}));setSelectedId(rootId);setOtherSelected([]);if(focusId&&removed.has(focusId))setFocusId(null);
   };
   const runSelected=async()=>{
     if(!selected||!selectedCapability)return;setError('');setBusy(true);
@@ -375,7 +423,7 @@ function Studio({feature,catalog,client,onFeatureChange,openRequest}:{feature:Fe
       const project=toGraph(JSON.stringify(current.projectGraph));
       setTraceability(current);setTraceError('');
       if((draftReadError||!sameValue(graph,project))&&!window.confirm('加载项目图会替换当前浏览器画布草稿。请先导出需要保留的草稿。确定继续吗？'))return;
-      setDraftReadError('');setFocusId(null);setGraph(clone(project));setGraphBase(clone(project));setSelectedId(project.nodes[0]?.id??'');setCollapsed(initialCollapsed());setTrace([]);setFitVersion(n=>n+1);
+      setDraftReadError('');setFocusId(null);setGraph(clone(project));setGraphBase(clone(project));setSelectedId(project.nodes[0]?.id??'');setOtherSelected([]);setCollapsed(initialCollapsed());setTrace([]);setFitVersion(n=>n+1);
       setGraphMessage({tone:'success',text:'已读取项目图。'});
     }catch(e){setGraphMessage({tone:'error',text:`无法读取项目图：${String(e)}。浏览器草稿未改变。`})}finally{setGraphBusy(false)}
   };
@@ -390,12 +438,44 @@ function Studio({feature,catalog,client,onFeatureChange,openRequest}:{feature:Fe
     }catch(e){setGraphMessage({tone:'error',text:`无法更新基线：${String(e)}。浏览器草稿未改变。`})}finally{setGraphBusy(false)}
   };
   const exportGraph=()=>{const blob=new Blob([draftReadError?initial.rawDraft:JSON.stringify(graph,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`contract.${example}${draftReadError?'.invalid-draft':''}.json`;a.click();URL.revokeObjectURL(url)};
-  const importGraph=async(file?:File)=>{if(!file)return;try{const g=toGraph(await file.text());setDraftReadError('');setFocusId(null);setGraph(g);setSelectedId(g.nodes[0]?.id??'');setTrace([]);setCollapsed(initialCollapsed());setFitVersion(n=>n+1);setGraphMessage(null)}catch(e){setGraphMessage({tone:'error',text:`无法导入画布：${String(e)}`})}};
-  const selectNode=(id:string)=>{setSelectedId(id);setError('');setPanelOpen(true);setTab(readOnly?'requirement':'property')};
+  const importGraph=async(file?:File)=>{if(!file)return;try{const g=toGraph(await file.text());setDraftReadError('');setFocusId(null);setGraph(g);setSelectedId(g.nodes[0]?.id??'');setOtherSelected([]);setTrace([]);setCollapsed(initialCollapsed());setFitVersion(n=>n+1);setGraphMessage(null)}catch(e){setGraphMessage({tone:'error',text:`无法导入画布：${String(e)}`})}};
+  const selectNode=(id:string,others:string[]=[])=>{setSelectedId(id);setOtherSelected(others);setTreeReveal(value=>value+1);setError('');setPanelOpen(true);setInspectorVisited(true);setTab(readOnly?'overview':'property')};
+  const clickGraphNode=(event:React.MouseEvent,node:DisplayNode)=>{
+    if(event.currentTarget instanceof HTMLElement)detailTrigger.current=event.currentTarget;
+    if(!event.shiftKey||!inspectorVisited){selectNode(node.id);return}
+    const previous=[...selectedOnCanvas];
+    const next=selectedOnCanvas.has(node.id)?previous.filter(id=>id!==node.id):[node.id,...previous];
+    if(!next.length){setSelectedId('');setOtherSelected([]);closeDetails();return}
+    selectNode(next[0],next.slice(1));
+  };
+  const selectFromList=(id:string)=>{
+    if(focus&&!focus.ids.has(id))setFocusId(null);
+    setCollapsed(previous=>{
+      const next=new Set(previous),seen=new Set<string>();
+      let parent=byId.get(id)?.parentId;
+      while(parent&&!seen.has(parent)){seen.add(parent);next.delete(parent);parent=byId.get(parent)?.parentId}
+      return next.size===previous.size?previous:next;
+    });
+    selectNode(id);
+  };
   const selectedPath:Spec[]=[];
   {let current=selected;const seen=new Set<string>();while(current&&!seen.has(current.id)){seen.add(current.id);selectedPath.unshift(current);current=current.parentId?byId.get(current.parentId):undefined}}
   const onFullRun=(run:Run)=>{setTrace(run.trace??[]);setNodeResult(run);setError('')};
-  const buildIndex=async()=>{setIndexBusy(true);setIndexError('');try{setTraceability(await api<Traceability>('/api/traceability/build',{featureId:traceability?.featureId??graph.feature.id}))}catch(reason){setIndexError(String(reason))}finally{setIndexBusy(false)}};
+  const buildIndex=async()=>{
+    setIndexBusy(true);setIndexError('');
+    try{
+      const updated=await api<Traceability>('/api/traceability/build',{featureId:traceability?.featureId??graph.feature.id});
+      setTraceability(updated);
+      // A published graph is an index projection, even when it was empty before the first build.
+      if(readOnly&&updated.index?.state==='current'&&!sameValue(graphRef.current,updated.projectGraph)){
+        const project=toGraph(JSON.stringify(updated.projectGraph));
+        setGraph(project);setGraphBase(project);
+        setSelectedId(id=>project.nodes.some(node=>node.id===id)?id:project.nodes[0]?.id??'');
+        setOtherSelected([]);
+        setFocusId(null);setFitVersion(value=>value+1);
+      }
+    }catch(reason){setIndexError(String(reason))}finally{setIndexBusy(false)}
+  };
   const linkRequirement=async()=>{
     const requirement=traceability?.requirements.find(item=>item.id===linkRequirementId);if(!requirement)return;
     setLinkBusy(true);setLinkError('');
@@ -407,9 +487,13 @@ function Studio({feature,catalog,client,onFeatureChange,openRequest}:{feature:Fe
     onFeatureChange(destination.alias,capability.frontend?.mode);setPanelOpen(false);
   };
   const graphStatus=!graphReady?'正在读取项目图…':traceError?'无法读取项目图，浏览器草稿仍可编辑':!graphCompatible?'画布功能与项目图不匹配':graphConflict?'项目图已变更，本地草稿未覆盖':!graphBase?'浏览器草稿缺少项目基线':graphDirty?'浏览器草稿 · 未保存到项目':'已与项目图同步';
+  const graphStatusShort=!graphReady?'读取中':traceError?'读取失败':!graphCompatible?'功能不匹配':graphConflict?'有冲突':!graphBase?'缺少基线':graphDirty?'待保存':'已同步';
+  const indexState=traceability?.index?.state??'missing';
+  const indexStatus=indexBusy?'构建中':traceLoading?'读取中':traceError?'读取失败':({current:'当前',stale:'待重建',failed:'构建失败',missing:'尚未构建',unconfigured:'未配置'} as const)[indexState];
+  const indexSource=traceability?.index?.source==='local-marker'?'本地标记兼容视图':'Sphinx-Needs / CodeLinks';
   return <div className="studio-shell">
-    <header className="topbar"><div className="brand"><div className="brand-symbol">◇</div><div><strong>Contract Studio</strong><span>让功能可见，让实现可验</span></div></div>{!readOnly&&<div className="top-actions"><button onClick={()=>void saveGraph()} disabled={!!draftReadError||!graphReady||graphBusy||!!traceError||!graphCompatible||!graphBase||graphConflict||!graphDirty} className="save-project">{graphBusy?'处理中…':'保存到项目'}</button><button onClick={exportGraph}>导出 JSON</button><button onClick={()=>fileRef.current?.click()} disabled={!graphReady}>导入</button><button onClick={()=>{if(draftReadError&&!window.confirm('重置会替换被拒绝的草稿，请先导出需要保留的原稿。继续吗？'))return;setDraftReadError('');setFocusId(null);setGraph(clone(original));setSelectedId(defaultSelected);setCollapsed(initialCollapsed());setTrace([]);setFitVersion(n=>n+1)}} disabled={!graphReady}>重置画布</button><input hidden type="file" ref={fileRef} accept=".json,application/json" onChange={e=>{void importGraph(e.target.files?.[0]);e.target.value=''}}/></div>}</header>
-    <div className="subheader">
+    <header className="topbar"><div className="brand"><div className="brand-symbol" aria-hidden="true">◇</div><strong>Contract Studio</strong></div>
+      <div className="project-name">
       {catalog.features.length === 1 ? <b>{feature.title}</b> :
         <div className="example-switcher">
           <label htmlFor="studio-example">功能工作区</label>
@@ -417,46 +501,74 @@ function Studio({feature,catalog,client,onFeatureChange,openRequest}:{feature:Fe
             {visibleFeatures(catalog,example).map(item=><option key={item.alias} value={item.alias}>{item.title}</option>)}
           </select>
         </div>}
-      <span className="sub-caption">需求 · 功能图 · 实现与测试</span>
+      </div>{!readOnly&&<div className="top-actions"><button onClick={()=>void saveGraph()} disabled={!!draftReadError||!graphReady||graphBusy||!!traceError||!graphCompatible||!graphBase||graphConflict||!graphDirty} className="save-project">{graphBusy?'处理中…':'保存到项目'}</button><button onClick={exportGraph}>导出 JSON</button><button onClick={()=>fileRef.current?.click()} disabled={!graphReady}>导入</button><button onClick={()=>{if(draftReadError&&!window.confirm('重置会替换被拒绝的草稿，请先导出需要保留的原稿。继续吗？'))return;setDraftReadError('');setFocusId(null);setGraph(clone(original));setSelectedId(defaultSelected);setOtherSelected([]);setCollapsed(initialCollapsed());setTrace([]);setFitVersion(n=>n+1)}} disabled={!graphReady}>重置画布</button><input hidden type="file" ref={fileRef} accept=".json,application/json" onChange={e=>{void importGraph(e.target.files?.[0]);e.target.value=''}}/></div>}</header>
+    <div className="graph-toolbar" aria-label="功能图工具栏">
+      <button ref={listToggle} type="button" aria-expanded={nodeListOpen} aria-controls="studio-node-list" onClick={()=>nodeListOpen?closeList():setNodeListOpen(true)}>功能树</button>
+      <div className="graph-view-controls" role="group" aria-label="图视图">
+        <button aria-pressed={importanceView} onClick={()=>setImportanceView(value=>!value)}>重点视图</button>
+        <button disabled={!selected||chainSelected} onClick={()=>{setOtherSelected([]);setFocusId(selectedId);setPanelOpen(false);setFitVersion(value=>value+1)}}>聚焦节点</button>
+        <button onClick={()=>{setFocusId(null);setFitVersion(value=>value+1)}}>{focus?'返回总览':'适合画布'}</button>
+      </div>
+      <details className="project-status" onKeyDown={event=>{
+        if(event.key==='Escape'&&event.currentTarget.open){event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus()}
+      }} onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget))event.currentTarget.open=false}}>
+        <summary aria-label={`项目状态：项目图${graphStatusShort}，需求索引${indexStatus}`}><span role="status" data-attention={graphStatusShort!=='已同步'}>项目图：{graphStatusShort}</span><span role="status" data-attention={indexStatus!=='当前'}>需求索引：{indexStatus}</span><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg></summary>
+        <div className="project-status-menu">
+          <section><h2>项目图</h2>{graphStatusShort!=='已同步'&&<p>{graphStatus}</p>}<div className="status-actions"><button onClick={refreshTraceability} disabled={!graphReady||graphBusy||traceLoading}>刷新状态</button><button onClick={()=>void loadProjectGraph()} disabled={!graphReady||graphBusy}>读取项目图</button>{!readOnly&&graphCompatible&&(graphConflict||!graphBase)&&<button onClick={()=>void rebaseGraph()} disabled={graphBusy}>保留草稿并更新基线</button>}</div></section>
+          <section><h2>需求索引</h2><p>{indexSource}</p>{traceability?.ubcode&&<p>ubCode：{traceability.ubcode.message}</p>}<div className="status-actions"><button disabled={indexBusy||traceLoading||!traceability} onClick={()=>void buildIndex()}>重建索引</button></div></section>
+        </div>
+      </details>
     </div>
-    <div className="workspace">
-      <section className={`canvas with-feature-panel ${focus?'is-focused':''}`}>
-        <div className="canvas-header"><strong>功能流程</strong><span>{readOnly?'点击节点查看需求、代码和报告':'点击编辑节点；在功能组内添加子节点'}</span><button onClick={()=>toggle(rootId)}>{collapsed.has(rootId)?'展开全部':'折叠功能'}</button></div>
-        <div className="graph-view-controls" role="group" aria-label="图视图"><button aria-pressed={importanceView} onClick={()=>setImportanceView(value=>!value)}>重点视图</button><button disabled={!selected} onClick={()=>{setFocusId(selectedId);setPanelOpen(false);setFitVersion(value=>value+1)}}>聚焦节点</button><button onClick={()=>{setFocusId(null);setFitVersion(value=>value+1)}}>{focus?'返回总览':'适合画布'}</button><span>{focus?'局部投影 · 布局只读，原图位置保持不变':importanceView?'突出核心与关键逻辑，保留全部连线':'全图 · 拖动节点可调整项目布局'}</span></div>
-        {focus&&<nav className="focus-path" aria-label="聚焦节点的所属功能"><span>所在功能</span>{focus.ancestors.map(item=><button key={item.id} onClick={()=>{setFocusId(item.id);setSelectedId(item.id)}}>{item.title} ›</button>)}<strong>{byId.get(focusId!)?.title??'项目根节点'}</strong></nav>}
-        <div className="importance-legend" aria-label="逻辑重要性图例"><span>逻辑重要性</span>{Object.entries(importanceLabels).map(([value,label])=><span className={`importance-badge importance-${value}`} key={value}>{label}</span>)}</div>
-        <div className={`graph-sync ${graphConflict||!graphBase?'attention':''}`} role="status"><span>{graphStatus}</span><div><button onClick={refreshTraceability} disabled={!graphReady||graphBusy||traceLoading}>刷新状态</button><button onClick={()=>void loadProjectGraph()} disabled={!graphReady||graphBusy}>读取项目图</button>{!readOnly&&graphCompatible&&(graphConflict||!graphBase)&&<button onClick={()=>void rebaseGraph()} disabled={graphBusy}>保留草稿并更新基线</button>}</div></div>
-        <div className={`index-status ${traceability?.index?.state??'missing'}`} role="status"><span><b>需求索引</b> · {indexBusy?'正在构建…':traceability?.index?({current:'已构建 · 当前',stale:'源已变化 · 待重建',failed:'构建失败',missing:'尚未构建',unconfigured:'未配置构建工具'} as const)[traceability.index.state]:'正在读取'}{traceability?.index?.source==='local-marker'?' · 本地标记兼容视图':' · Sphinx-Needs / CodeLinks'}</span><button className="link-button" disabled={indexBusy||traceLoading||!traceability} onClick={()=>void buildIndex()}>重建索引</button></div>
-        {traceability?.ubcode&&<div className="index-tool-note">ubCode：{traceability.ubcode.message}</div>}
+    <div className={`workspace ${nodeListOpen?'has-node-list':''} ${panelOpen?'has-node-details':''}`}>
+      <div className="drawer-track drawer-track-left" data-open={nodeListOpen}>
+        <nav ref={listDrawer} id="studio-node-list" className="node-list drawer-content" aria-label="功能树" aria-hidden={!nodeListOpen}>
+          <div className="node-list-heading"><strong>功能树</strong><CloseDrawer label="关闭功能树" onClose={closeList}/></div>
+          <FunctionTree nodes={graph.nodes} selectedId={selectedId} reveal={treeReveal} open={nodeListOpen} drawer={listDrawer}
+            onSelect={(id,item)=>{detailTrigger.current=item;selectFromList(id)}}/>
+        </nav>
+      </div>
+      <section className={`canvas with-feature-panel ${focus?'is-focused':''}`} aria-label="功能流程">
+        {focus&&<nav className="focus-path" aria-label="聚焦节点的所属功能"><span>所在功能</span>{focus.ancestors.map(item=><button key={item.id} onClick={()=>{setFocusId(item.id);setSelectedId(item.id);setOtherSelected([])}}>{item.title} ›</button>)}<strong>{byId.get(focusId!)?.title??'项目根节点'}</strong></nav>}
         {(indexError||traceability?.index?.error)&&<div className="graph-message error" role="alert">{indexError||traceability?.index?.error}</div>}
         {draftReadError&&<div className="graph-message error" role="alert">浏览器草稿读取被拒绝：{draftReadError}。原始草稿已保留，当前显示项目示例且暂停自动保存；“导出 JSON”可备份原稿，再读取项目图或导入修正版。</div>}
         {graphMessage&&<div className={`graph-message ${graphMessage.tone}`} role={graphMessage.tone==='error'?'alert':'status'}>{graphMessage.text}</div>}
-        <ReactFlow style={focus?{height:Math.max(480,...[...focus.positions.values()].map(position=>position.y+230))}:undefined} nodes={flowNodes} edges={flowEdges} nodesDraggable={!readOnly&&graphReady&&!focusId} nodesConnectable={!readOnly&&graphReady} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} onNodeClick={(_,n)=>selectNode(n.id)} onNodeDoubleClick={(_,n)=>{if(graph.nodes.some(x=>x.parentId===n.id))toggleNode(n.id)}} onPaneClick={(event)=>{if(!readOnly&&event.detail===2&&graphReady)addChild(rootId)}} fitView fitViewOptions={{padding:.06}} minZoom={.2} maxZoom={1.5} zoomOnScroll={false} preventScrolling={false} deleteKeyCode={null} defaultEdgeOptions={{type:'branch'}}>
+        <ReactFlow style={focus?{height:Math.max(480,...[...focus.positions.values()].map(position=>position.y+230))}:undefined}
+          nodes={flowNodes} edges={flowEdges} nodesDraggable={!readOnly&&graphReady&&!focusId} nodesConnectable={!readOnly&&graphReady}
+          nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect}
+          multiSelectionKeyCode={null} selectionKeyCode={null} elevateNodesOnSelect={false} onNodeClick={clickGraphNode}
+          onNodeDoubleClick={(event,n)=>{if(!event.shiftKey&&graph.nodes.some(x=>x.parentId===n.id))toggleNode(n.id)}}
+          onPaneClick={(event)=>{if(!readOnly&&event.detail===2&&graphReady)addChild(rootId);else setOtherSelected([])}}
+          fitView fitViewOptions={{padding:.06}} minZoom={.2} maxZoom={1.5} zoomOnScroll={false} preventScrolling={false} deleteKeyCode={null} defaultEdgeOptions={{type:'branch'}}>
           <Background gap={22} size={1} color="#e6ebf0"/><Controls position="bottom-left" showInteractive={false}/>
           <Fit value={fitVersion} focusId={focusId}/>
+          <KeepNodeInView open={panelOpen} nodeId={selectedId} neighborIds={selectedNeighbors}/>
         </ReactFlow>
-        <div className="canvas-footer"><span>{readOnly?'独立项目 · 节点图基于项目规格与源码索引':'在功能组里添加节点，也可双击空白处添加。连线表示业务数据与分支。'}</span><span>当前显示 {flowNodes.filter(node=>!node.hidden).length} 节点 · {flowEdges.filter(edge=>!edge.hidden).length} 条边 <small>全图 {graph.nodes.length} 节点 · {graph.edges.length} 条边</small></span></div>
+        <div className="canvas-footer"><div className="importance-legend" aria-label="逻辑重要性图例">{Object.entries(importanceLabels).map(([value,label])=><span className={`importance-badge importance-${value}`} key={value}>{label}</span>)}</div><span>当前 {flowNodes.filter(node=>!node.hidden).length} 节点 · {flowEdges.filter(edge=>!edge.hidden).length} 连线 {focus&&<small>全图 {graph.nodes.length} 节点 · {graph.edges.length} 连线</small>}</span></div>
         {!readOnly&&<div className="feature-outlet" id="feature-outlet"><FeaturePanel feature={feature} onRun={onFullRun} runtimeOptions={runtimeOptions} onRuntimeOptionsChange={options=>{setRuntimeOptions(options);setNodeResult(null);setSource(null);setTrace([])}} openRequest={openRequest}/></div>}
       </section>
-      <aside className={`right-side node-drawer ${panelOpen?'is-open':''}`} aria-label="节点详情">
-        <section className="inspector" hidden={!panelOpen}>
-          <div className="panel-heading"><div><div className="eyebrow">节点检查器</div><h2>{selected?.title??'选择节点'}</h2></div><div className="degree">入 {degree.in} / 出 {degree.out}</div><button type="button" className="drawer-close" aria-label="关闭节点详情" onClick={()=>setPanelOpen(false)}>×</button></div>
-          {selected&&<>
-            {selectedPath.length>1&&<nav className="node-path" aria-label="功能层级">{selectedPath.map((part,index)=><span key={part.id}>{index>0&&<span className="path-separator" aria-hidden="true">›</span>}{index===selectedPath.length-1?<strong aria-current="location">{part.title}</strong>:<button type="button" onClick={()=>selectNode(part.id)}>{part.title}</button>}</span>)}</nav>}
-            <p className="description">{selected.description}</p>
-            <div className="info-pair"><span>输入</span><b>{selected.input}</b></div><div className="info-pair"><span>输出</span><b>{selected.output}</b></div>
-            <div className="tabs">{(['property','document','requirement','test','trace','code'] as const).filter(t=>!readOnly||!['property','trace'].includes(t)).map(t=><button key={t} className={tab===t?'active':''} onClick={()=>setTab(t)}>{t==='property'?'节点属性':t==='document'?'文档与任务':t==='requirement'?'需求关联':t==='test'?(readOnly?'测试报告':'运行与测试'):t==='trace'?'日志':'实现映射'}</button>)}</div>
+      <div className="drawer-track drawer-track-right" data-open={panelOpen}>
+      <aside ref={detailDrawer} className="node-drawer drawer-content" aria-label="节点详情" aria-hidden={!panelOpen}>
+        {inspectorVisited&&<section className="inspector">
+          <div className="panel-heading"><h2>{chainSelected?'链路测试':selected?.title??'选择节点'}</h2><div className="degree">{chainSelected?`${selectedOnCanvas.size} 个节点`:`入 ${degree.in} / 出 ${degree.out}`}</div><CloseDrawer label="关闭节点详情" onClose={closeDetails}/></div>
+          {chainSelected?<ChainTestDraft key={JSON.stringify([...selectedOnCanvas].sort())} graph={graph} ids={[...selectedOnCanvas]}/>:selected&&<>
+            {selectedPath.length>1&&<nav className="node-path" aria-label="所属功能">{selectedPath.slice(0,-1).map((part,index)=><span key={part.id}>{index>0&&<span className="path-separator" aria-hidden="true">›</span>}<button type="button" onClick={()=>selectNode(part.id)}>{part.title}</button></span>)}</nav>}
+            {!readOnly&&<><p className="description">{selected.description}</p><div className="info-pair"><span>输入</span><b>{selected.input}</b></div><div className="info-pair"><span>输出</span><b>{selected.output}</b></div></>}
+            <div className="tabs" role="group" aria-label="节点详情视图">{(readOnly?(['overview','requirement','code','test','document'] as const):(['property','document','requirement','test','trace','code'] as const)).map(t=><button key={t} className={tab===t?'active':''} aria-pressed={tab===t} onClick={()=>setTab(t)}>{t==='overview'?'概览':t==='property'?'节点属性':t==='document'?'文档与任务':t==='requirement'?'需求关联':t==='test'?(readOnly?'测试报告':'运行与测试'):t==='trace'?'日志':'实现映射'}</button>)}</div>
+            {readOnly&&<PublishedEvidence key={selected.id} featureId={feature.id} nodeId={selected.id} active={panelOpen}
+              view={tab==='overview'?'overview':tab==='code'?'implementation':tab==='test'?'report':'hidden'}
+              indexVersion={JSON.stringify([indexState,traceability?.index?.builtAt])} requirements={selectedRequirements}
+              onRequirement={id=>{setActiveRequirementId(id);setTab('requirement')}}/>}
+            {tab==='overview'&&<details className="evidence-more node-contract"><summary>节点说明</summary><p className="description">{selected.description}</p><div className="info-pair"><span>输入</span><b>{selected.input}</b></div><div className="info-pair"><span>输出</span><b>{selected.output}</b></div></details>}
             {tab==='property'&&!readOnly&&<NodeProperties key={selected.id} node={selected} nodes={graph.nodes} capabilities={capabilities} onPatch={update} onSave={()=>void saveGraph()} saving={graphBusy} canSave={!draftReadError&&graphDirty&&!graphConflict&&graphCompatible&&!!graphBase&&!!selected.title.trim()} onRemove={selected.id===rootId?undefined:remove}/>}
             {tab==='document'&&<NodeDocument featureId={feature.id} graph={graph} nodeId={selected.id} dirty={!projectGraph||!sameValue(graph,projectGraph)} sourceVersion={traceability}/>}
             {tab==='requirement'&&<>
               {compatible&&!traceLoading&&!traceError&&<div className="requirement-picker">
-                {selectedRequirements.length>0&&<div className="field"><label htmlFor="node-requirement">关联需求 · {selectedRequirements.length} 条</label><select id="node-requirement" value={creatingRequirement?'':selectedRequirement?.id??''} onChange={event=>{setActiveRequirementId(event.target.value);setCreatingRequirement(false)}}>{creatingRequirement&&<option value="">正在创建新需求</option>}{selectedRequirements.map(requirement=><option key={requirement.id} value={requirement.id}>{requirement.id} · {requirement.title}</option>)}</select></div>}
+                {(selectedRequirements.length>1||!readOnly&&selectedRequirements.length>0)&&<div className="field"><label htmlFor="node-requirement">关联需求 · {selectedRequirements.length} 条</label><select id="node-requirement" value={creatingRequirement?'':selectedRequirement?.id??''} onChange={event=>{setActiveRequirementId(event.target.value);setCreatingRequirement(false)}}>{creatingRequirement&&<option value="">正在创建新需求</option>}{selectedRequirements.map(requirement=><option key={requirement.id} value={requirement.id}>{requirement.id} · {requirement.title}</option>)}</select></div>}
                 {!readOnly&&<details><summary>关联已有需求或新增需求</summary><div className="requirement-link-row"><select aria-label="选择已有需求" value={linkRequirementId} onChange={event=>setLinkRequirementId(event.target.value)}><option value="">选择已有需求</option>{traceability?.requirements.filter(requirement=>!(requirement.nodeIds??[requirement.nodeId]).includes(selectedId)).map(requirement=><option key={requirement.id} value={requirement.id}>{requirement.id} · {requirement.title}</option>)}</select><button className="link-button" disabled={!linkRequirementId||linkBusy||!projectGraph?.nodes.some(node=>node.id===selectedId)} onClick={()=>void linkRequirement()}>关联</button></div><button className="link-button" onClick={()=>setCreatingRequirement(true)}>＋ 创建新需求</button>{!projectGraph?.nodes.some(node=>node.id===selectedId)&&<p className="micro">先将新节点保存到项目，再关联需求。</p>}</details>}
                 {linkError&&<div className="notice notice-error" role="alert">{linkError}</div>}
               </div>}
               <RequirementPanel key={`${selected.id}:${creatingRequirement?'new':selectedRequirement?.id??'new'}:${selectedRequirement?.revision??0}`} node={selected} compatible={compatible} readOnly={readOnly} requirement={creatingRequirement?undefined:selectedRequirement} draft={!creatingRequirement&&selectedRequirement?requirementDrafts[selectedRequirement.id]:undefined} traceability={traceability} loading={traceLoading} error={traceError} onRefresh={refreshTraceability} onSave={saveRequirement} onCreate={async(...args)=>{await createRequirement(...args);setActiveRequirementId(args[1]);setCreatingRequirement(false)}} onDraftChange={changeDraft} onDiscard={discardDraft}/>
             </>}
-            {tab==='test'&&readOnly&&<PublishedTests key={selected.id} featureId={feature.id} nodeId={selected.id}/>}
              {tab==='test'&&!readOnly&&<div className="inspector-body">
               <CapabilityPanel key={selectedCapability?.id??selected.id} capability={selectedCapability} onOpen={openCapability}/>
               <div className="property-section-title">节点试运行</div>
@@ -468,12 +580,12 @@ function Studio({feature,catalog,client,onFeatureChange,openRequest}:{feature:Fe
               {nodeResult&&<div className="result"><span className="result-head">运行结果 {nodeResult.simulated?'（仅 Mock）':''}</span><pre>{JSON.stringify(nodeResult.output??nodeResult.result??nodeResult,null,2)}</pre></div>}
             </div>}
             {tab==='trace'&&<div className="inspector-body"><div className="micro">执行记录区分真实运行、汇总与 Mock；Mock 只展示模拟结果。</div>{trace.length?trace.map((s,i)=><div className={`trace-step ${s.nodeId===selectedId?'highlight':''}`} key={i}><div className="trace-line"><b>{s.nodeId}</b><span>{s.status} · {s.derived?'根据实际运行汇总':`${s.elapsedMs}ms`} {s.adapter?`· ${s.adapter}`:''}</span></div>{!s.derived&&<details><summary>查看输入输出</summary><pre>{JSON.stringify({input:s.input,output:s.output},null,2)}</pre></details>}</div>):<div className="empty">提交表单或测试单个节点后查看。</div>}</div>}
-            {tab==='code'&&<div className="inspector-body"><div className="property-section-title">实际能力与函数</div>{selectedCapability?<><div className="code-ref">{selectedCapability.id} · {selectedCapability.runPath}</div>{selectedCapability.implementation.map(reference=><div className="code-ref" key={`${reference.path}:${reference.symbol}`}><strong>{reference.symbol}</strong><br/>{reference.path}</div>)}<div className="code-ref">前端：{selectedCapability.frontend?`${selectedCapability.frontend.component} / ${selectedCapability.frontend.mode??'默认'}`:'待接入'}</div></>:<div className="capability-pending">此节点尚未绑定实际能力。</div>}<div className="property-section-title">节点定位</div><div className="code-ref">{selected.code||'尚未绑定实现位置'}</div><div className="code-ref">{selected.test||'尚未绑定测试位置'}</div>{source?<pre className="source">{source.excerpt}</pre>:<div className="empty">在需求关联中查看当前索引的代码与测试位置。</div>}</div>}
+            {tab==='code'&&!readOnly&&<div className="inspector-body"><div className="property-section-title">实际能力与函数</div>{selectedCapability?<><div className="code-ref">{selectedCapability.id} · {selectedCapability.runPath}</div>{selectedCapability.implementation.map(reference=><div className="code-ref" key={`${reference.path}:${reference.symbol}`}><strong>{reference.symbol}</strong><br/>{reference.path}</div>)}<div className="code-ref">前端：{selectedCapability.frontend?`${selectedCapability.frontend.component} / ${selectedCapability.frontend.mode??'默认'}`:'待接入'}</div></>:<div className="capability-pending">此节点尚未绑定实际能力。</div>}<div className="property-section-title">节点定位</div><div className="code-ref">{selected.code||'尚未绑定实现位置'}</div><div className="code-ref">{selected.test||'尚未绑定测试位置'}</div>{source?<pre className="source">{source.excerpt}</pre>:<div className="empty">在需求关联中查看当前索引的代码与测试位置。</div>}</div>}
           </>}
-        </section>
+        </section>}
       </aside>
+      </div>
     </div>
-    <footer className="footer"><span>Contract JSON 是意图；实际运行与测试才是证据。</span><span>需求追踪 · React Flow · Sphinx-Needs</span></footer>
   </div>;
 }
 export default function App(){

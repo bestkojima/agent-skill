@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": [
+      "node"
+    ],
+    "strict": false
+  },
+  "include": [
+    "server",
+    "scripts",
+    "vite.config.ts"
+  ]
+}

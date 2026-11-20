@@ -9,6 +9,7 @@ INPUT_HINT = "数字列表用空格分隔（如 1 2 3）；算式按 Enter"
 
 
 class CalculatorWindow(ttk.Frame):
+    # @need-ids: SPEC_PYCALC_UI
     def __init__(self, root):
         super().__init__(root, style="Shell.TFrame", padding=20)
         root.title("计算器")
@@ -62,11 +63,13 @@ class CalculatorWindow(ttk.Frame):
         root.bind("<Escape>", lambda _: self.press("C"))
         self.entry.focus_set()
 
+    # @need-ids: SPEC_PYCALC_UI
     def load_example(self):
         self.entry_value.set(LIST_EXAMPLE)
         self.entry.icursor("end")
         self.entry.focus_set()
 
+    # @need-ids: SPEC_PYCALC_UI
     def press(self, key):
         if key == "C":
             self.entry_value.set("")
@@ -105,6 +108,7 @@ class CalculatorWindow(ttk.Frame):
             self.steps.insert("end", f"{number:02d}   {step.label}")
 
 
+# @need-ids: SPEC_PYCALC_UI
 def main():
     root = tk.Tk()
     CalculatorWindow(root)

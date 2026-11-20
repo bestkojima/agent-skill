@@ -19,7 +19,7 @@ python run_tests.py
 
 ## 需求与测试
 
-- [requirements.rst](requirements.rst) 维护 `req`、带 `need_part` 的验收条件及 `spec`。在规格里用 `fulfills` 关联需求。
+- [计算器需求与规格](../../traceability/python-calculator.rst) 维护 `req`、带 `need_part` 的验收条件及 `spec`。在规格里用 `fulfills` 关联需求。
 - [calculator.py](calculator.py) 和 [app.py](app.py) 的 `# @need-ids:` 引用规格 ID，由 CodeLinks 定位函数。
 - [测试](tests/test_calculator.py) 用 `@need test` 声明用例。用 `:verifies:` 指向 `需求ID.验收项ID` 和直接验证的规格 ID。方法名 `test_TEST_…` 中的 ID 让报告直接对上索引。
 - 不带参数运行测试会写全量报告 `_build/test-results.json`。在工作台点「运行本节点测试」，项目执行器通过 `--test-id` 只跑索引选出的用例；本次结果返回工作台，原报告保留不变。

@@ -1,4 +1,4 @@
-import type { Importance } from './node-importance.mjs';
+import type { Importance } from './node-importance.ts';
 export type Kind = 'group' | 'ui' | 'logic' | 'async' | 'action';
 export type Spec = {
   id:string; parentId:string|null; title:string; kind:Kind; description:string; importance?:Importance;

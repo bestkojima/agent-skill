@@ -23,13 +23,13 @@
 
 真实 Sphinx 集成反例验证：只改 JSON 后构建旧 RST，图、能力、源码导航及草稿统一识别过期；改用 `contract_fields/satisfies` 后，节点属性、需求、函数、能力和测试证据契约一起生效，编辑继续写回定制字段。独立图只提供文件描述符仍可读取，无需登记或需求文件。生成 RST 中的布局快照不进入行为属性，避免移动节点使行为证据误过期。
 
-这些行为通过 `tests/needs-projection.test.mjs` 的读取 Interface 验证；内部规则适配由 `tests/needs-schema.test.mjs` 验证。既有保存、节点上下文、索引失败恢复、能力证据和旧入口的定向测试通过。主工作台真实索引为 `current`，平均值能力通过 14 项测试、4 个原生验收用例匹配通过。本轮未修改前端。
+这些行为通过 `tests/needs-projection.test.ts` 的读取 Interface 验证；内部规则适配由 `tests/needs-schema.test.ts` 验证。既有保存、节点上下文、索引失败恢复、能力证据和旧入口的定向测试通过。主工作台真实索引为 `current`，平均值能力通过 14 项测试、4 个原生验收用例匹配通过。本轮未修改前端。
 
 ## 本轮验收重点：陌生节点也能自动关联
 
 2026-11-14 的调整保留四步 Skill，将规范示例和工具分工集中在 README。验收时给 Agent 一个已有登记表里从未出现的节点任务：只编写原生需求／spec、函数标记及原生测试声明，重建后应自动得到节点属性、具体函数和验收关联。对同一需求下的两个节点，函数必须按 spec 精确归属；有测试声明但未执行时应显示未运行，执行后按文件与 `[TEST_ID]` 读取结果。工作台修改原生节点后，行为写回 RST，布局独立保存。
 
-本轮 `tests/needs-projection.test.mjs` 的陌生库存 fixture 已通过 4 项集成验证：自动关联链；属性写回、布局独立与函数移动后的重新定位；原生需求变更使确认失效；混合来源图的父子关系、连线编辑及删除。
+本轮 `tests/needs-projection.test.ts` 的陌生库存 fixture 已通过 4 项集成验证：自动关联链；属性写回、布局独立与函数移动后的重新定位；原生需求变更使确认失效；混合来源图的父子关系、连线编辑及删除。
 
 独立 Agent 按新版 Skill 和 README 在隔离目录新增折扣功能，未改框架、登记表、JSON 节点、路由或前端。真实 Sphinx＋CodeLinks 构建为 `current`，自动得到两条链：`REQ_DISCOUNT_INPUT → SPEC_DISCOUNT_VALIDATE → validateDiscountInput → TEST_DISCOUNT_VALIDATE` 与 `REQ_DISCOUNT_AMOUNT → SPEC_DISCOUNT_PRICE → calculateDiscountPrice → TEST_DISCOUNT_PRICE`。节点的 `key/core` 及自定义 `currency/precision` 属性进入 `context.properties`。直接运行 2 项测试通过；未接可信执行入口，框架仍标为未运行，未把外部运行冒充工作台证据。试用原始产物位于 `C:/Users/LG/AppData/Local/Temp/contract-skill-discount-HyMTXS/`，证据为 `trial-evidence.json` 和 `tests-output.txt`。
 
