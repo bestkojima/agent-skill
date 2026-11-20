@@ -4,7 +4,7 @@ Agent 写需求、规格与源码标记；Sphinx-Needs 解析条目和关系，C
 
 ## 1. 编写需求和节点规格
 
-新原生条目写入 `traceability/` 下的手写 RST，并加入 `traceability/index.rst` 的 `toctree`。下面只说明格式，按真实任务替换 ID 与内容：
+原生条目写在项目拥有的 RST 中；在 `traceability/index.rst` 接入该文档或其引用页。下面只说明格式，按真实任务替换 ID 与内容：
 
 ```rst
 .. req:: 名称不能为空
